@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vullify
+      POSTGRES_PASSWORD: vullify
+      POSTGRES_DB: vullify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vullify -d vullify"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  trivy:
+    image: aquasec/trivy:0.58.1
+    command: ["server", "--listen", "0.0.0.0:4954"]
+    ports:
+      - "4954:4954"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: postgres://vullify:vullify@postgres:5432/vullify?sslmode=disable
+      REDIS_ADDR: redis:6379
+      TRIVY_SERVER: http://trivy:4954
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q OK"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      trivy:
+        condition: service_started
+
+  # Consumes Redis scan queue and runs Trivy CLI against image refs (status: pending → running → completed).
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      DATABASE_URL: postgres://vullify:vullify@postgres:5432/vullify?sslmode=disable
+      REDIS_ADDR: redis:6379
+      TRIVY_PATH: trivy
+      SCAN_QUEUE_KEY: vullify:scan:queue
+      SCAN_EVENTS_CHANNEL: vullify:scan:events
+      WORKER_POOL_SIZE: "3"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

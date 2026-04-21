@@ -1,0 +1,36 @@
+# Example: run vullify CLI against a deployed Vullify API.
+# Repository secrets: VULLIFY_URL (e.g. https://vullify.example.com), VULLIFY_TOKEN (optional).
+
+name: vullify scan
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+
+      - name: Install vullify CLI
+        run: go install ./cmd/cli
+        working-directory: ${{ github.workspace }}
+
+      - name: Run scan (image must already exist in Vullify)
+        env:
+          VULLIFY_URL: ${{ secrets.VULLIFY_URL }}
+          VULLIFY_TOKEN: ${{ secrets.VULLIFY_TOKEN }}
+          IMAGE_REF: ghcr.io/${{ github.repository }}:latest
+        run: |
+          set -euo pipefail
+          vullify scan "${IMAGE_REF}" \
+            --server "${VULLIFY_URL}" \
+            --token "${VULLIFY_TOKEN}" \
+            --fail-on high \
+            --timeout 10m

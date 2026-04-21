@@ -1,0 +1,28 @@
+# Example GitLab CI job using the vullify CLI.
+# Configure CI/CD variables: VULLIFY_URL, VULLIFY_TOKEN (optional).
+
+stages:
+  - scan
+
+variables:
+  GO_VERSION: "1.25"
+
+vullify-scan:
+  stage: scan
+  image: golang:${GO_VERSION}
+  before_script:
+    - cd "$CI_PROJECT_DIR"
+    - go build -o /usr/local/bin/vullify ./cmd/cli
+  script:
+    - |
+      vullify scan "${IMAGE_REF}" \
+        --server "${VULLIFY_URL}" \
+        --token "${VULLIFY_TOKEN}" \
+        --fail-on high \
+        --timeout 10m
+  variables:
+    # Must match an image already registered in Vullify (same canonical ref).
+    IMAGE_REF: "${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

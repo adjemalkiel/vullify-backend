@@ -1,0 +1,13 @@
+DROP TABLE IF EXISTS webhook_events;
+DROP TABLE IF EXISTS scan_sboms;
+DROP TABLE IF EXISTS enrichments;
+DROP TABLE IF EXISTS findings;
+DROP TABLE IF EXISTS scans;
+DROP TABLE IF EXISTS images;
+DROP TABLE IF EXISTS registries;
+
+DROP TYPE IF EXISTS sbom_format;
+DROP TYPE IF EXISTS severity;
+DROP TYPE IF EXISTS scan_trigger;
+DROP TYPE IF EXISTS scan_status;
+DROP TYPE IF EXISTS registry_type;

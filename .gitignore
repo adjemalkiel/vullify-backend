@@ -1,0 +1,6 @@
+# Local build outputs
+bin/
+/vullify.exe
+/api.exe
+/cli.exe
+/worker.exe

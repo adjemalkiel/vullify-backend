@@ -1,0 +1,828 @@
+openapi: 3.0.3
+info:
+  title: Vullify API
+  description: |
+    REST API for container registry integration, vulnerability scans (Trivy), findings,
+    enrichment (EPSS / KEV), and reporting. List responses wrap payloads in `data` with optional `meta` pagination.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Health
+  - name: Webhooks
+  - name: Registries
+  - name: Images
+  - name: Scans
+  - name: Findings
+  - name: Dashboard
+  - name: Reports
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: OK
+
+  /webhooks/dockerhub:
+    post:
+      tags: [Webhooks]
+      summary: Docker Hub push webhook
+      description: |
+        Authenticated via registry credentials (`webhook_secret`). Accepts `Authorization: Bearer` or `X-Webhook-Token`.
+      operationId: webhookDockerHub
+      parameters:
+        - name: Authorization
+          in: header
+          schema:
+            type: string
+        - name: X-Webhook-Token
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Docker Hub webhook JSON payload
+      responses:
+        "200":
+          description: Accepted (processing may continue asynchronously)
+        "400":
+          description: Invalid payload
+        "401":
+          description: Unauthorized
+
+  /webhooks/github:
+    post:
+      tags: [Webhooks]
+      summary: GitHub / GHCR package webhook
+      description: |
+        Authenticated via registry `github_token` and `webhook_secret` (HMAC headers).
+      operationId: webhookGitHub
+      parameters:
+        - name: X-Hub-Signature-256
+          in: header
+          schema:
+            type: string
+        - name: X-Hub-Signature
+          in: header
+          schema:
+            type: string
+        - name: X-GitHub-Event
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Accepted
+        "400":
+          description: Invalid payload
+        "401":
+          description: Unauthorized
+
+  /webhooks/gitlab:
+    post:
+      tags: [Webhooks]
+      summary: GitLab container registry webhook
+      description: Authenticated via `X-Gitlab-Token` matching registry `webhook_secret`.
+      operationId: webhookGitLab
+      parameters:
+        - name: X-Gitlab-Token
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Accepted
+        "400":
+          description: Invalid payload
+        "401":
+          description: Unauthorized
+
+  /api/v1/registries:
+    get:
+      tags: [Registries]
+      summary: List registries
+      operationId: listRegistries
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryListEnvelope"
+    post:
+      tags: [Registries]
+      summary: Create registry
+      description: Validates connector credentials with a live connection test before insert.
+      operationId: createRegistry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistryCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "422":
+          description: Registry connection failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/registries/{id}:
+    parameters:
+      - $ref: "#/components/parameters/RegistryId"
+    get:
+      tags: [Registries]
+      summary: Get registry
+      operationId: getRegistry
+      responses:
+        "200":
+          description: Registry detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Registries]
+      summary: Update registry
+      operationId: updateRegistry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistryUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegistryEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Registry connection failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      tags: [Registries]
+      summary: Soft-delete registry
+      operationId: deleteRegistry
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/registries/{id}/sync:
+    parameters:
+      - $ref: "#/components/parameters/RegistryId"
+    post:
+      tags: [Registries]
+      summary: Sync images from registry
+      description: Lists repositories and tags from the registry and upserts image rows.
+      operationId: syncRegistry
+      responses:
+        "200":
+          description: Sync summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      synced_images:
+                        type: integer
+                      repositories_seen:
+                        type: integer
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: Registry sync failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/images:
+    get:
+      tags: [Images]
+      summary: List images
+      operationId: listImages
+      parameters:
+        - name: registry_id
+          in: query
+          description: Filter by registry UUID
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated images
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageListEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/images/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ImageId"
+    get:
+      tags: [Images]
+      summary: Get image detail
+      operationId: getImage
+      responses:
+        "200":
+          description: Image with registry URL and latest scan hints
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ImageDetail"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scans:
+    post:
+      tags: [Scans]
+      summary: Create scan
+      description: Creates a scan job and enqueues it on Redis for the worker.
+      operationId: createScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScan"
+      responses:
+        "201":
+          description: Scan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanDetailEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/scans/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: Get scan detail
+      operationId: getScan
+      responses:
+        "200":
+          description: Scan with severity counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanDetailEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scans/{id}/findings:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: List findings for scan
+      operationId: listScanFindings
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: package_name
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated findings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingListEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/scans/{id}/sbom:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: Get raw SBOM JSON
+      description: Returns JSON body; `X-SBOM-Format` header indicates format.
+      operationId: getScanSBOM
+      responses:
+        "200":
+          description: SBOM payload
+          headers:
+            X-SBOM-Format:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/findings/{id}:
+    parameters:
+      - $ref: "#/components/parameters/FindingId"
+    get:
+      tags: [Findings]
+      summary: Get finding detail
+      description: Includes enrichment fields when available (EPSS, KEV, known exploits).
+      operationId: getFinding
+      responses:
+        "200":
+          description: Finding detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingDetailEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Dashboard aggregates
+      operationId: dashboardSummary
+      responses:
+        "200":
+          description: Counts by resource and severity
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      total_images:
+                        type: integer
+                      total_scans:
+                        type: integer
+                      total_findings:
+                        type: integer
+                      by_severity:
+                        type: object
+                        additionalProperties:
+                          type: integer
+
+  /api/v1/reports/vulnerability:
+    get:
+      tags: [Reports]
+      summary: Vulnerability occurrence report
+      operationId: vulnerabilityReport
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Start date (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          description: End date (YYYY-MM-DD), inclusive end-of-day
+          schema:
+            type: string
+            format: date
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated vulnerability rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VulnerabilityReportEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    RegistryId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ImageId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ScanId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FindingId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ValidationError:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: invalid JSON body
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+    Meta:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+          format: int64
+
+    Envelope:
+      type: object
+      properties:
+        data: {}
+        meta:
+          $ref: "#/components/schemas/Meta"
+
+    Registry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          description: dockerhub, gitlab, ecr, gcr, ghcr
+        url:
+          type: string
+        credentials_set:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RegistryCreate:
+      type: object
+      required: [name, type, url]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+        credentials:
+          description: Connector-specific JSON (default {})
+          type: object
+
+    RegistryUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+        credentials:
+          type: object
+
+    RegistryEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Registry"
+
+    RegistryListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Registry"
+
+    Image:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        registry_id:
+          type: string
+          format: uuid
+        repository:
+          type: string
+        tag:
+          type: string
+        digest:
+          type: string
+          nullable: true
+        first_seen_at:
+          type: string
+        last_seen_at:
+          type: string
+
+    ImageDetail:
+      allOf:
+        - $ref: "#/components/schemas/Image"
+        - type: object
+          properties:
+            registry_url:
+              type: string
+            latest_scan_id:
+              type: string
+              nullable: true
+            latest_scan_status:
+              type: string
+              nullable: true
+            latest_scan_started_at:
+              type: string
+              nullable: true
+            latest_scan_completed_at:
+              type: string
+              nullable: true
+
+    ImageListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Image"
+
+    CreateScan:
+      type: object
+      description: Provide exactly one of image_id or image_ref
+      properties:
+        image_id:
+          type: string
+          format: uuid
+        image_ref:
+          type: string
+          description: Canonical pull reference matching stored images
+
+    ScanDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        image_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        triggered_by:
+          type: string
+        started_at:
+          type: string
+          nullable: true
+        completed_at:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        trivy_version:
+          type: string
+          nullable: true
+        repository:
+          type: string
+        tag:
+          type: string
+        severity_counts:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+
+    ScanDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ScanDetail"
+
+    FindingListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        vulnerability_id:
+          type: string
+        package_name:
+          type: string
+        severity:
+          type: string
+        created_at:
+          type: string
+        installed_version:
+          type: string
+        fixed_version:
+          type: string
+        title:
+          type: string
+
+    FindingListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/FindingListItem"
+
+    FindingDetail:
+      type: object
+      description: Dynamic object; optional enrichment fields
+      additionalProperties: true
+
+    FindingDetailEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/FindingDetail"
+
+    VulnerabilityReportRow:
+      type: object
+      properties:
+        vulnerability_id:
+          type: string
+        severity:
+          type: string
+        occurrences:
+          type: integer
+        last_seen:
+          type: string
+
+    VulnerabilityReportEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/VulnerabilityReportRow"
