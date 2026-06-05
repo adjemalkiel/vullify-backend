@@ -24,12 +24,15 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 type FindingRef struct {
 	ID              uuid.UUID
 	VulnerabilityID string
+	CVSSV3Score     *float64
+	FixedVersion    *string
 }
 
 // ListFindingsByScan returns findings for a completed scan.
 func (r *Repository) ListFindingsByScan(ctx context.Context, scanID uuid.UUID) ([]FindingRef, error) {
 	rows, err := r.Pool.Query(ctx, `
-		SELECT id, vulnerability_id FROM findings WHERE scan_id = $1
+		SELECT id, vulnerability_id, cvss_v3_score, fixed_version
+		FROM findings WHERE scan_id = $1
 	`, scanID)
 	if err != nil {
 		return nil, err
@@ -39,7 +42,7 @@ func (r *Repository) ListFindingsByScan(ctx context.Context, scanID uuid.UUID) (
 	var out []FindingRef
 	for rows.Next() {
 		var f FindingRef
-		if err := rows.Scan(&f.ID, &f.VulnerabilityID); err != nil {
+		if err := rows.Scan(&f.ID, &f.VulnerabilityID, &f.CVSSV3Score, &f.FixedVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -55,6 +58,8 @@ type EnrichmentUpsert struct {
 	KEVListed        bool
 	KEVDateAdded     *time.Time
 	KnownExploits    json.RawMessage // optional JSONB; nil → SQL NULL
+	ExploitExists    bool
+	RiskScore        *float64
 }
 
 // Upsert persists or updates enrichment for a finding.
@@ -65,9 +70,10 @@ func (r *Repository) Upsert(ctx context.Context, e EnrichmentUpsert) error {
 	}
 	_, err := r.Pool.Exec(ctx, `
 		INSERT INTO enrichments (
-			finding_id, epss_score, epss_percentile, kev_listed, kev_date_added, known_exploits, enriched_at
+			finding_id, epss_score, epss_percentile, kev_listed, kev_date_added,
+			known_exploits, exploit_exists, risk_score, enriched_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6::jsonb, now()
+			$1, $2, $3, $4, $5, $6::jsonb, $7, $8, now()
 		)
 		ON CONFLICT (finding_id) DO UPDATE SET
 			epss_score = EXCLUDED.epss_score,
@@ -75,8 +81,11 @@ func (r *Repository) Upsert(ctx context.Context, e EnrichmentUpsert) error {
 			kev_listed = EXCLUDED.kev_listed,
 			kev_date_added = EXCLUDED.kev_date_added,
 			known_exploits = EXCLUDED.known_exploits,
+			exploit_exists = EXCLUDED.exploit_exists,
+			risk_score = EXCLUDED.risk_score,
 			enriched_at = now()
-	`, e.FindingID, e.EPSSScore, e.EPSSPercentile, e.KEVListed, e.KEVDateAdded, kev)
+	`, e.FindingID, e.EPSSScore, e.EPSSPercentile, e.KEVListed, e.KEVDateAdded,
+		kev, e.ExploitExists, e.RiskScore)
 	if err != nil {
 		return fmt.Errorf("enrichment upsert: %w", err)
 	}

@@ -5,12 +5,6 @@ import (
 	"errors"
 )
 
-// ScanResult aggregates vulnerability findings and a CycloneDX SBOM (JSON bytes).
-type ScanResult struct {
-	Vulnerabilities []VulnResult
-	SBOM            []byte // CycloneDX JSON
-}
-
 // VulnResult is a single finding from a Trivy JSON report.
 type VulnResult struct {
 	VulnerabilityID  string
@@ -21,6 +15,69 @@ type VulnResult struct {
 	Title            string
 	Description      string
 	DataSource       string
+	CVSSV3Score      float64
+	CVSSV3Vector     string
+	PrimaryURL       string
+	LayerDigest      string
+	LayerIndex       int
+}
+
+// PackageResult is a package entry from the SBOM inventory.
+type PackageResult struct {
+	Name        string
+	Version     string
+	Type        string
+	LayerDigest string
+	Licenses    []string
+	FilePath    string
+}
+
+// MisconfigResult is a misconfiguration finding.
+type MisconfigResult struct {
+	Type        string
+	CheckID     string
+	Title       string
+	Description string
+	Severity    string
+	Resolution  string
+	FilePath    string
+	StartLine   int
+	EndLine     int
+}
+
+// SecretResult is a detected secret.
+type SecretResult struct {
+	RuleID      string
+	Category    string
+	Severity    string
+	Title       string
+	MatchText   string
+	FilePath    string
+	StartLine   int
+	EndLine     int
+	LayerDigest string
+}
+
+// ScanMetadata holds image-level metadata from Trivy.
+type ScanMetadata struct {
+	OS           string
+	Architecture string
+	ImageID      string
+	Created      string
+	ImageSize    int64
+	LayerCount   int
+	BaseImage    string
+}
+
+// ScanResult aggregates vulnerability findings and SBOMs in multiple formats.
+type ScanResult struct {
+	Vulnerabilities  []VulnResult
+	Packages         []PackageResult
+	Misconfigurations []MisconfigResult
+	Secrets          []SecretResult
+	Metadata         *ScanMetadata
+	SBOMCycloneDX    []byte
+	SBOMSPDX         []byte
 }
 
 // Scanner runs container image scans (implemented by TrivyScanner; mock in tests).
@@ -45,7 +102,7 @@ const (
 // TrivyError wraps a failed trivy invocation with stderr and classification.
 type TrivyError struct {
 	Kind   ErrorKind
-	Phase  string // "json" or "cyclonedx"
+	Phase  string // "json", "cyclonedx", or "spdx"
 	Stderr string
 	Exit   int
 	Err    error

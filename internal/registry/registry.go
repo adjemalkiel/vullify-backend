@@ -15,6 +15,8 @@ const (
 	TypeECR       = "ecr"
 	TypeGCR       = "gcr"
 	TypeGHCR      = "ghcr"
+	TypeACR       = "acr"
+	TypeGeneric   = "generic"
 )
 
 // RegistryConnector talks to a container registry (list repos/tags, resolve digests).
@@ -61,6 +63,18 @@ func NewConnector(registryType string, credentials json.RawMessage) (RegistryCon
 			return nil, fmt.Errorf("ghcr credentials: %w", err)
 		}
 		return NewGHCR(c), nil
+	case TypeACR:
+		var c ACRCredentials
+		if err := json.Unmarshal(credentials, &c); err != nil {
+			return nil, fmt.Errorf("acr credentials: %w", err)
+		}
+		return NewACR(c), nil
+	case TypeGeneric:
+		var c V2Credentials
+		if err := json.Unmarshal(credentials, &c); err != nil {
+			return nil, fmt.Errorf("v2 credentials: %w", err)
+		}
+		return NewV2Registry(c, c.RegistryURL), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnsupportedType, registryType)
 	}

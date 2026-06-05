@@ -116,6 +116,62 @@ func scanDetailToResp(d db.ScanDetail) scanDetailResp {
 	}
 }
 
+type scanListRow struct {
+	ID            string           `json:"id"`
+	ImageID       string           `json:"image_id"`
+	Status        string           `json:"status"`
+	TriggeredBy   string           `json:"triggered_by"`
+	StartedAt     *string          `json:"started_at,omitempty"`
+	CompletedAt   *string          `json:"completed_at,omitempty"`
+	ErrorMessage  *string          `json:"error_message,omitempty"`
+	TrivyVersion  *string          `json:"trivy_version,omitempty"`
+	Repository    string           `json:"repository"`
+	Tag           string           `json:"tag"`
+	SeverityCounts map[string]int64 `json:"severity_counts"`
+}
+
+func scanRowToResp(r db.ScanRow) scanListRow {
+	counts := make(map[string]int64)
+	if r.CriticalCount > 0 {
+		counts["critical"] = r.CriticalCount
+	}
+	if r.HighCount > 0 {
+		counts["high"] = r.HighCount
+	}
+	if r.MediumCount > 0 {
+		counts["medium"] = r.MediumCount
+	}
+	if r.LowCount > 0 {
+		counts["low"] = r.LowCount
+	}
+	if r.UnknownCount > 0 {
+		counts["unknown"] = r.UnknownCount
+	}
+	return scanListRow{
+		ID: r.ID.String(), ImageID: r.ImageID.String(),
+		Status: r.Status, TriggeredBy: r.TriggeredBy,
+		StartedAt: ptrTime(r.StartedAt), CompletedAt: ptrTime(r.CompletedAt),
+		ErrorMessage: r.ErrorMessage, TrivyVersion: r.TrivyVersion,
+		Repository: r.Repository, Tag: r.Tag,
+		SeverityCounts: counts,
+	}
+}
+
+func (s *Server) listScans(w http.ResponseWriter, r *http.Request) {
+	page, perPage, offset := parsePagination(r)
+	status := r.URL.Query().Get("status")
+	rows, total, err := db.ListScans(r.Context(), s.Pool, status, offset, perPage)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "list failed: "+err.Error())
+		return
+	}
+	out := make([]scanListRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, scanRowToResp(row))
+	}
+	writeEnvelope(w, http.StatusOK, out, &Meta{Page: page, PerPage: perPage, Total: int64(total)})
+}
+
 func (s *Server) getScan(w http.ResponseWriter, r *http.Request) {
 	id, err := parseUUID(chi.URLParam(r, "id"))
 	if err != nil {
@@ -141,7 +197,7 @@ func (s *Server) listScanFindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, perPage, offset := parsePagination(r)
-	sev := r.URL.Query().Get("severity")
+	sev := strings.ToLower(r.URL.Query().Get("severity"))
 	pkg := r.URL.Query().Get("package_name")
 	sort := r.URL.Query().Get("sort")
 	rows, total, err := db.ListFindingsForScan(r.Context(), s.Pool, scanID, sev, pkg, sort, offset, perPage)

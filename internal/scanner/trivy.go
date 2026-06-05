@@ -12,17 +12,13 @@ import (
 )
 
 // ExecFunc runs a command like exec.CommandContext; used for tests (fake trivy).
-// Returns stdout, stderr, exit code, and err (non-nil usually when exit != 0).
 type ExecFunc func(ctx context.Context, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
 
 // TrivyScanner runs the trivy CLI as a subprocess.
 type TrivyScanner struct {
-	// TrivyPath is the trivy binary name or path (default: "trivy").
 	TrivyPath string
-	// Timeout bounds the entire ScanImage (both subprocesses). Zero means 5 minutes.
-	Timeout time.Duration
-	// Exec, if non-nil, is used instead of the real exec.CommandContext runner.
-	Exec ExecFunc
+	Timeout   time.Duration
+	Exec      ExecFunc
 }
 
 // ScanImage implements Scanner.
@@ -33,7 +29,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 
 	timeout := s.Timeout
 	if timeout == 0 {
-		timeout = 5 * time.Minute
+		timeout = 10 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -48,7 +44,11 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 	jsonArgs := []string{
 		"image",
 		"--format", "json",
-		"--severity", "CRITICAL,HIGH,MEDIUM,LOW",
+		"--scanners", "vuln,misconfig,secret,license",
+		"--list-all-pkgs",
+		"--pkg-types", "os,library",
+		"--quiet",
+		"--timeout", "10m",
 		imageRef,
 	}
 	stdout, stderr, exit, runErr := run(ctx, path, jsonArgs)
@@ -56,7 +56,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 		return nil, classifyAndWrap("json", stderr, exit, runErr)
 	}
 
-	vulns, err := parseTrivyJSONReport(stdout)
+	result, err := parseTrivyJSONReport(stdout)
 	if err != nil {
 		return nil, &TrivyError{
 			Kind:   KindScan,
@@ -85,11 +85,29 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 			Err:    errors.New("cyclonedx output is not valid JSON"),
 		}
 	}
+	result.SBOMCycloneDX = bytes.Clone(sbomOut)
 
-	return &ScanResult{
-		Vulnerabilities: vulns,
-		SBOM:            bytes.Clone(sbomOut),
-	}, nil
+	spdxArgs := []string{
+		"image",
+		"--format", "spdx-json",
+		imageRef,
+	}
+	spdxOut, spdxErrText, spdxExit, spdxRunErr := run(ctx, path, spdxArgs)
+	if spdxRunErr != nil || spdxExit != 0 {
+		return nil, classifyAndWrap("spdx", spdxErrText, spdxExit, spdxRunErr)
+	}
+	if !json.Valid(spdxOut) {
+		return nil, &TrivyError{
+			Kind:   KindScan,
+			Phase:  "spdx",
+			Stderr: string(spdxErrText),
+			Exit:   spdxExit,
+			Err:    errors.New("spdx output is not valid JSON"),
+		}
+	}
+	result.SBOMSPDX = bytes.Clone(spdxOut)
+
+	return result, nil
 }
 
 func (s *TrivyScanner) execFn() ExecFunc {
@@ -131,7 +149,6 @@ func classifyAndWrap(phase string, stderr []byte, exit int, runErr error) error 
 
 func classifyTrivyFailure(stderr string, exit int) ErrorKind {
 	s := strings.ToLower(stderr)
-	// Heuristic: registry / image availability issues.
 	if strings.Contains(s, "failed to pull") ||
 		strings.Contains(s, "unable to pull") ||
 		strings.Contains(s, "error pulling") ||
@@ -145,7 +162,6 @@ func classifyTrivyFailure(stderr string, exit int) ErrorKind {
 		strings.Contains(s, "no match for platform") && strings.Contains(s, "manifest") {
 		return KindPull
 	}
-	// OCI/registry connection issues often mention transport.
 	if strings.Contains(s, "tls: ") ||
 		strings.Contains(s, "connection refused") ||
 		strings.Contains(s, "i/o timeout") ||
@@ -155,9 +171,24 @@ func classifyTrivyFailure(stderr string, exit int) ErrorKind {
 	return KindScan
 }
 
-func parseTrivyJSONReport(data []byte) ([]VulnResult, error) {
+func parseTrivyJSONReport(data []byte) (*ScanResult, error) {
 	var report struct {
+		Metadata *struct {
+			OS *struct {
+				Family string `json:"Family"`
+				Name   string `json:"Name"`
+			} `json:"OS"`
+			ImageConfig struct {
+				Architecture string `json:"architecture"`
+				Created      string `json:"created"`
+			} `json:"ImageConfig"`
+			ImageID string `json:"ImageID"`
+			Size    int64  `json:"Size"`
+		} `json:"Metadata"`
 		Results []struct {
+			Target          string `json:"Target"`
+			Class           string `json:"Class"`
+			Type            string `json:"Type"`
 			Vulnerabilities []struct {
 				VulnerabilityID  string          `json:"VulnerabilityID"`
 				PkgName          string          `json:"PkgName"`
@@ -166,29 +197,162 @@ func parseTrivyJSONReport(data []byte) ([]VulnResult, error) {
 				Severity         string          `json:"Severity"`
 				Title            string          `json:"Title"`
 				Description      string          `json:"Description"`
+				PrimaryURL       string          `json:"PrimaryURL"`
 				DataSource       json.RawMessage `json:"DataSource"`
+				CVSS             struct {
+					Nvd *struct {
+						V3Score  float64 `json:"V3Score"`
+						V3Vector string  `json:"V3Vector"`
+					} `json:"nvd"`
+				} `json:"CVSS"`
+				Layer *struct {
+					Digest string `json:"Digest"`
+				} `json:"Layer"`
 			} `json:"Vulnerabilities"`
+			Packages []struct {
+				Name      string   `json:"Name"`
+				Version   string   `json:"Version"`
+				Licenses  []string `json:"Licenses"`
+				Layer     *struct {
+					Digest string `json:"Digest"`
+				} `json:"Layer"`
+				FilePath string `json:"FilePath"`
+			} `json:"Packages"`
+			Misconfigurations []struct {
+				Type        string `json:"Type"`
+				ID          string `json:"ID"`
+				Title       string `json:"Title"`
+				Description string `json:"Description"`
+				Severity    string `json:"Severity"`
+				Resolution  string `json:"Resolution"`
+				CauseMetadata *struct {
+					Resource  string `json:"Resource"`
+					StartLine int    `json:"StartLine"`
+					EndLine   int    `json:"EndLine"`
+				} `json:"CauseMetadata"`
+			} `json:"Misconfigurations"`
+			Secrets []struct {
+				RuleID    string `json:"RuleID"`
+				Category  string `json:"Category"`
+				Severity  string `json:"Severity"`
+				Title     string `json:"Title"`
+				Match     string `json:"Match"`
+				Code *struct {
+					Lines []struct {
+						Number int `json:"Number"`
+					} `json:"Lines"`
+				} `json:"Code"`
+				Layer *struct {
+					Digest string `json:"Digest"`
+				} `json:"Layer"`
+			} `json:"Secrets"`
 		} `json:"Results"`
 	}
 	if err := json.Unmarshal(data, &report); err != nil {
 		return nil, err
 	}
-	var out []VulnResult
+
+	result := &ScanResult{}
+
+	if report.Metadata != nil {
+		meta := &ScanMetadata{
+			ImageID:   report.Metadata.ImageID,
+			ImageSize: report.Metadata.Size,
+		}
+		if report.Metadata.OS != nil {
+			if report.Metadata.OS.Family != "" {
+				meta.OS = report.Metadata.OS.Family
+				if report.Metadata.OS.Name != "" {
+					meta.OS += " " + report.Metadata.OS.Name
+				}
+			}
+		}
+		meta.Architecture = report.Metadata.ImageConfig.Architecture
+		meta.Created = report.Metadata.ImageConfig.Created
+		result.Metadata = meta
+	}
+
 	for _, res := range report.Results {
-		for _, v := range res.Vulnerabilities {
-			out = append(out, VulnResult{
-				VulnerabilityID:  v.VulnerabilityID,
-				PackageName:      v.PkgName,
-				InstalledVersion: v.InstalledVersion,
-				FixedVersion:     v.FixedVersion,
-				Severity:         v.Severity,
-				Title:            v.Title,
-				Description:      v.Description,
-				DataSource:       stringifyDataSource(v.DataSource),
-			})
+		layerIndex := 0
+		switch res.Class {
+		case "os-pkgs", "lang-pkgs":
+			for _, p := range res.Packages {
+				pkg := PackageResult{
+					Name:     p.Name,
+					Version:  p.Version,
+					Type:     res.Type,
+					Licenses: p.Licenses,
+					FilePath: p.FilePath,
+				}
+				if p.Layer != nil {
+					pkg.LayerDigest = p.Layer.Digest
+				}
+				result.Packages = append(result.Packages, pkg)
+			}
+			for _, v := range res.Vulnerabilities {
+				vuln := VulnResult{
+					VulnerabilityID:  v.VulnerabilityID,
+					PackageName:      v.PkgName,
+					InstalledVersion: v.InstalledVersion,
+					FixedVersion:     v.FixedVersion,
+					Severity:         v.Severity,
+					Title:            v.Title,
+					Description:      v.Description,
+					PrimaryURL:       v.PrimaryURL,
+					DataSource:       stringifyDataSource(v.DataSource),
+					LayerIndex:       layerIndex,
+				}
+				if v.CVSS.Nvd != nil {
+					vuln.CVSSV3Score = v.CVSS.Nvd.V3Score
+					vuln.CVSSV3Vector = v.CVSS.Nvd.V3Vector
+				}
+				if v.Layer != nil {
+					vuln.LayerDigest = v.Layer.Digest
+				}
+				result.Vulnerabilities = append(result.Vulnerabilities, vuln)
+			}
+			layerIndex++
+
+		case "config":
+			for _, m := range res.Misconfigurations {
+				mis := MisconfigResult{
+					Type:        m.Type,
+					CheckID:     m.ID,
+					Title:       m.Title,
+					Description: m.Description,
+					Severity:    m.Severity,
+					Resolution:  m.Resolution,
+				}
+				if m.CauseMetadata != nil {
+					mis.FilePath = m.CauseMetadata.Resource
+					mis.StartLine = m.CauseMetadata.StartLine
+					mis.EndLine = m.CauseMetadata.EndLine
+				}
+				result.Misconfigurations = append(result.Misconfigurations, mis)
+			}
+
+		case "secret":
+			for _, sec := range res.Secrets {
+				secret := SecretResult{
+					RuleID:   sec.RuleID,
+					Category: sec.Category,
+					Severity: sec.Severity,
+					Title:    sec.Title,
+					MatchText: sec.Match,
+				}
+				if sec.Code != nil && len(sec.Code.Lines) > 0 {
+					secret.StartLine = sec.Code.Lines[0].Number
+					secret.EndLine = sec.Code.Lines[len(sec.Code.Lines)-1].Number
+				}
+				if sec.Layer != nil {
+					secret.LayerDigest = sec.Layer.Digest
+				}
+				result.Secrets = append(result.Secrets, secret)
+			}
 		}
 	}
-	return out, nil
+
+	return result, nil
 }
 
 func stringifyDataSource(raw json.RawMessage) string {

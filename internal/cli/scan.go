@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -11,7 +12,13 @@ import (
 )
 
 func newScanCmd() *cobra.Command {
-	var failOn string
+	var (
+		failOn        string
+		failOnKEV     bool
+		failOnUnfixed bool
+		epssThreshold float64
+		outputFormat  string
+	)
 	cmd := &cobra.Command{
 		Use:   "scan <image_ref>",
 		Short: "Create a scan by image ref, wait for completion, print findings",
@@ -21,6 +28,10 @@ func newScanCmd() *cobra.Command {
 			thr, err := parseFailOn(failOn)
 			if err != nil {
 				return err
+			}
+
+			if outputFormat != "table" && outputFormat != "json" && outputFormat != "sarif" {
+				return fmt.Errorf("--output must be table, json, or sarif")
 			}
 
 			client := newClient()
@@ -66,22 +77,95 @@ func newScanCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			findings, err := client.ListAllFindings(ctx, scanID)
-			if err != nil {
-				return err
-			}
-			printFindingsTable(findings)
+			needsEnrichment := failOnKEV || failOnUnfixed || epssThreshold > 0 || outputFormat == "json" || outputFormat == "sarif"
+			var enriched []FindingWithEnrichment
+			var findings []Finding
 
-			for _, f := range findings {
-				if MeetsFailThreshold(f.Severity, thr) {
-					fmt.Fprintf(os.Stderr, "\nexit 1: found %s finding (fail-on threshold)\n", f.Severity)
-					os.Exit(1)
+			if needsEnrichment {
+				enriched, err = client.ListAllFindingsWithEnrichment(ctx, scanID)
+				if err != nil {
+					return err
 				}
+			} else {
+				findings, err = client.ListAllFindings(ctx, scanID)
+				if err != nil {
+					return err
+				}
+			}
+
+			// Output.
+			switch outputFormat {
+			case "json":
+				out := json.NewEncoder(os.Stdout)
+				out.SetIndent("", "  ")
+				if err := out.Encode(enriched); err != nil {
+					return err
+				}
+			case "sarif":
+				if err := writeSARIF(os.Stdout, enriched, imageRef); err != nil {
+					return err
+				}
+			default:
+				if needsEnrichment {
+					printFindingsWithEnrichmentTable(enriched)
+				} else {
+					printFindingsTable(findings)
+				}
+			}
+
+			// Evaluate policy gates.
+			policyFailed := false
+			var policyViolations []string
+
+			if needsEnrichment {
+				for _, f := range enriched {
+					if MeetsFailThreshold(f.Severity, thr) {
+						policyFailed = true
+						policyViolations = append(policyViolations,
+							fmt.Sprintf("severity threshold: %s finding (%s in %s)", f.Severity, f.VulnerabilityID, f.PackageName))
+					}
+					if failOnKEV && f.KevListed {
+						policyFailed = true
+						policyViolations = append(policyViolations,
+							fmt.Sprintf("KEV listed: %s (%s)", f.VulnerabilityID, f.PackageName))
+					}
+					if failOnUnfixed && f.FixedVersion == "" {
+						policyFailed = true
+						policyViolations = append(policyViolations,
+							fmt.Sprintf("unfixed: %s (%s@%s)", f.VulnerabilityID, f.PackageName, f.InstalledVersion))
+					}
+					if epssThreshold > 0 && f.EPSSScore > epssThreshold {
+						policyFailed = true
+						policyViolations = append(policyViolations,
+							fmt.Sprintf("EPSS threshold (%.2f): %s (%.4f) in %s", epssThreshold, f.VulnerabilityID, f.EPSSScore, f.PackageName))
+					}
+				}
+			} else {
+				for _, f := range findings {
+					if MeetsFailThreshold(f.Severity, thr) {
+						policyFailed = true
+						policyViolations = append(policyViolations,
+							fmt.Sprintf("severity threshold: %s finding (%s in %s)", f.Severity, f.VulnerabilityID, f.PackageName))
+					}
+				}
+			}
+
+			if policyFailed {
+				fmt.Fprintln(os.Stderr, "\nPolicy violations:")
+				for _, v := range policyViolations {
+					fmt.Fprintf(os.Stderr, "  - %s\n", v)
+				}
+				fmt.Fprintln(os.Stderr)
+				os.Exit(1)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&failOn, "fail-on", "high", "Exit 1 if any finding is this severity or higher (critical|high|medium|low|unknown)")
+	cmd.Flags().BoolVar(&failOnKEV, "fail-on-kev", false, "Exit 1 if any finding is listed in CISA KEV")
+	cmd.Flags().BoolVar(&failOnUnfixed, "fail-on-unfixed", false, "Exit 1 if any finding has no fixed version")
+	cmd.Flags().Float64Var(&epssThreshold, "epss-threshold", 0.0, "Exit 1 if any finding exceeds EPSS score threshold (0.0 = disabled)")
+	cmd.Flags().StringVar(&outputFormat, "output", "table", "Output format: table, json, or sarif")
 	return cmd
 }
 

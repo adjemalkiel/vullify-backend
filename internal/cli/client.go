@@ -122,7 +122,7 @@ func (c *Client) GetScan(ctx context.Context, scanID string) (map[string]any, er
 	return m, nil
 }
 
-// Finding is one vulnerability row from the API.
+// Finding is one vulnerability row from the API listing.
 type Finding struct {
 	ID                string `json:"id"`
 	VulnerabilityID   string `json:"vulnerability_id"`
@@ -131,6 +131,36 @@ type Finding struct {
 	InstalledVersion  string `json:"installed_version,omitempty"`
 	FixedVersion      string `json:"fixed_version,omitempty"`
 	Title             string `json:"title,omitempty"`
+}
+
+// FindingWithEnrichment includes enrichment fields from the detail API.
+type FindingWithEnrichment struct {
+	ID               string  `json:"id"`
+	VulnerabilityID  string  `json:"vulnerability_id"`
+	PackageName      string  `json:"package_name"`
+	Severity         string  `json:"severity"`
+	InstalledVersion string  `json:"installed_version,omitempty"`
+	FixedVersion     string  `json:"fixed_version,omitempty"`
+	Title            string  `json:"title,omitempty"`
+	EPSSScore        float64 `json:"epss_score,omitempty"`
+	KevListed        bool    `json:"kev_listed"`
+	ExploitExists    bool    `json:"exploit_exists"`
+	RiskScore        float64 `json:"risk_score,omitempty"`
+}
+
+// findingDetailResponse mirrors GET /api/v1/findings/:id response inside envelope.
+type findingDetailResponse struct {
+	ID               string  `json:"id"`
+	VulnerabilityID  string  `json:"vulnerability_id"`
+	PackageName      string  `json:"package_name"`
+	Severity         string  `json:"severity"`
+	InstalledVersion string  `json:"installed_version,omitempty"`
+	FixedVersion     string  `json:"fixed_version,omitempty"`
+	Title            string  `json:"title,omitempty"`
+	EPSSScore        float64 `json:"epss_score,omitempty"`
+	KevListed        bool    `json:"kev_listed"`
+	ExploitExists    bool    `json:"exploit_exists"`
+	RiskScore        float64 `json:"risk_score,omitempty"`
 }
 
 // ListAllFindings paginates GET /api/v1/scans/:id/findings.
@@ -186,6 +216,66 @@ func (c *Client) ListAllFindings(ctx context.Context, scanID string) ([]Finding,
 		}
 	}
 	return all, nil
+}
+
+// GetFindingDetail fetches a single finding with enrichment from GET /api/v1/findings/:id.
+func (c *Client) GetFindingDetail(ctx context.Context, findingID string) (FindingWithEnrichment, error) {
+	u := c.BaseURL + "/api/v1/findings/" + url.PathEscape(findingID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return FindingWithEnrichment{}, err
+	}
+	c.authHeader(req)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return FindingWithEnrichment{}, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return FindingWithEnrichment{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return FindingWithEnrichment{}, parseAPIError(resp.StatusCode, raw)
+	}
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return FindingWithEnrichment{}, fmt.Errorf("decode envelope: %w", err)
+	}
+	var d findingDetailResponse
+	if err := json.Unmarshal(env.Data, &d); err != nil {
+		return FindingWithEnrichment{}, fmt.Errorf("decode finding detail: %w", err)
+	}
+	return FindingWithEnrichment{
+		ID:               d.ID,
+		VulnerabilityID:  d.VulnerabilityID,
+		PackageName:      d.PackageName,
+		Severity:         d.Severity,
+		InstalledVersion: d.InstalledVersion,
+		FixedVersion:     d.FixedVersion,
+		Title:            d.Title,
+		EPSSScore:        d.EPSSScore,
+		KevListed:        d.KevListed,
+		ExploitExists:    d.ExploitExists,
+		RiskScore:        d.RiskScore,
+	}, nil
+}
+
+// ListAllFindingsWithEnrichment fetches all findings for a scan, then enriches each with detail.
+func (c *Client) ListAllFindingsWithEnrichment(ctx context.Context, scanID string) ([]FindingWithEnrichment, error) {
+	findings, err := c.ListAllFindings(ctx, scanID)
+	if err != nil {
+		return nil, err
+	}
+	var enriched []FindingWithEnrichment
+	for _, f := range findings {
+		d, err := c.GetFindingDetail(ctx, f.ID)
+		if err != nil {
+			return nil, fmt.Errorf("enrich finding %s: %w", f.ID, err)
+		}
+		enriched = append(enriched, d)
+	}
+	return enriched, nil
 }
 
 // GetSBOM GET /api/v1/scans/:id/sbom (raw JSON body, not envelope).

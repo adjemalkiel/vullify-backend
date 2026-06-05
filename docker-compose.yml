@@ -34,6 +34,43 @@ services:
     command: ["server", "--listen", "0.0.0.0:4954"]
     ports:
       - "4954:4954"
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+
+  # Downloads the Trivy vulnerability database on a schedule so workers share a
+  # pre-populated cache and do not each need to fetch it on startup.
+  db-updater:
+    image: aquasec/trivy:0.58.1
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        echo "db-updater: starting, cache dir is $${TRIVY_CACHE_DIR:-/var/trivy/cache}"
+        while true; do
+          echo "$$(date -u +'%Y-%m-%dT%H:%M:%SZ') db-updater: fetching database..."
+          trivy image --download-db-only --db-repository ghcr.io/aquasecurity/trivy-db 2>&1
+          echo "$$(date -u +'%Y-%m-%dT%H:%M:%SZ') db-updater: sleeping $${DB_UPDATE_INTERVAL:-21600}s"
+          sleep "$${DB_UPDATE_INTERVAL:-21600}"
+        done
+    environment:
+      TRIVY_CACHE_DIR: /root/.cache/trivy
+      DB_UPDATE_INTERVAL: "21600"
+    volumes:
+      - trivy-cache:/root/.cache/trivy
+
+  # MinIO object storage for optional SBOM offload.
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
 
   api:
     build:
@@ -69,9 +106,12 @@ services:
       DATABASE_URL: postgres://vullify:vullify@postgres:5432/vullify?sslmode=disable
       REDIS_ADDR: redis:6379
       TRIVY_PATH: trivy
+      TRIVY_CACHE_DIR: /var/trivy/cache
       SCAN_QUEUE_KEY: vullify:scan:queue
       SCAN_EVENTS_CHANNEL: vullify:scan:events
       WORKER_POOL_SIZE: "3"
+    volumes:
+      - trivy-cache:/var/trivy/cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,3 +123,5 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  trivy-cache:
+  minio_data:

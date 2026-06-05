@@ -29,7 +29,7 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 		"id": d.ID.String(), "scan_id": d.ScanID.String(),
 		"vulnerability_id": d.VulnerabilityID, "package_name": d.PackageName,
 		"severity": d.Severity, "created_at": d.CreatedAt.UTC().Format(timeRFC3339),
-		"kev_listed": d.KEVListed,
+		"kev_listed": d.KEVListed, "exploit_exists": d.ExploitExists,
 		"image": map[string]string{"repository": d.ImageRepository, "tag": d.ImageTag},
 	}
 	if d.InstalledVersion != nil {
@@ -52,6 +52,9 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.EPSSPercentile != nil {
 		m["epss_percentile"] = *d.EPSSPercentile
+	}
+	if d.RiskScore != nil {
+		m["risk_score"] = *d.RiskScore
 	}
 	if d.KEVDateAdded != nil {
 		m["kev_date_added"] = d.KEVDateAdded.Format("2006-01-02")

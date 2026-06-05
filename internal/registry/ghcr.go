@@ -71,7 +71,7 @@ func (g *GHCR) TestConnection(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		return fmt.Errorf("ghcr registry: %s: %s", resp.Status, strings.TrimSpace(string(b)))
 	}

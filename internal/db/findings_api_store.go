@@ -27,6 +27,8 @@ type FindingDetail struct {
 	KEVListed        bool
 	KEVDateAdded     *time.Time
 	KnownExploits    json.RawMessage
+	ExploitExists    bool
+	RiskScore        *float64
 	EnrichedAt       *time.Time
 	ImageRepository  string
 	ImageTag         string
@@ -39,7 +41,8 @@ func GetFindingDetail(ctx context.Context, pool *pgxpool.Pool, findingID uuid.UU
 		SELECT
 			f.id, f.scan_id, f.vulnerability_id, f.package_name, f.installed_version, f.fixed_version,
 			f.severity::text, f.title, f.description, f.data_source, f.created_at,
-			e.epss_score, e.epss_percentile, COALESCE(e.kev_listed, false), e.kev_date_added, e.known_exploits, e.enriched_at,
+			e.epss_score, e.epss_percentile, COALESCE(e.kev_listed, false), e.kev_date_added,
+			e.known_exploits, COALESCE(e.exploit_exists, false), e.risk_score, e.enriched_at,
 			i.repository, i.tag
 		FROM findings f
 		JOIN scans s ON s.id = f.scan_id
@@ -47,10 +50,11 @@ func GetFindingDetail(ctx context.Context, pool *pgxpool.Pool, findingID uuid.UU
 		JOIN registries r ON r.id = i.registry_id
 		LEFT JOIN enrichments e ON e.finding_id = f.id
 		WHERE f.id = $1 AND i.deleted_at IS NULL AND r.deleted_at IS NULL
-	`, findingID).Scan(
+		`+suppressionFilter, findingID).Scan(
 		&d.ID, &d.ScanID, &d.VulnerabilityID, &d.PackageName, &d.InstalledVersion, &d.FixedVersion,
 		&d.Severity, &d.Title, &d.Description, &d.DataSource, &d.CreatedAt,
-		&d.EPSSScore, &d.EPSSPercentile, &d.KEVListed, &d.KEVDateAdded, &d.KnownExploits, &d.EnrichedAt,
+		&d.EPSSScore, &d.EPSSPercentile, &d.KEVListed, &d.KEVDateAdded,
+		&d.KnownExploits, &d.ExploitExists, &d.RiskScore, &d.EnrichedAt,
 		&d.ImageRepository, &d.ImageTag,
 	)
 	return d, err

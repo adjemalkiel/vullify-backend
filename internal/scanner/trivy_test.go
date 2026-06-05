@@ -13,8 +13,20 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 
 	reportJSON := `{
   "SchemaVersion": 2,
+  "Metadata": {
+    "OS": {"Family": "alpine", "Name": "3.19.0"},
+    "ImageID": "sha256:abc123",
+    "ImageConfig": {"architecture": "amd64", "created": "2024-01-01T00:00:00Z"},
+    "Size": 5000000
+  },
   "Results": [
     {
+      "Target": "alpine:3.19 (alpine 3.19.0)",
+      "Class": "os-pkgs",
+      "Type": "alpine",
+      "Packages": [
+        {"Name": "musl", "Version": "1.2.4", "Licenses": ["MIT"], "FilePath": "/lib/musl"}
+      ],
       "Vulnerabilities": [
         {
           "VulnerabilityID": "CVE-2021-1",
@@ -24,13 +36,17 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
           "Severity": "HIGH",
           "Title": "t",
           "Description": "d",
-          "DataSource": {"Name": "debian"}
+          "PrimaryURL": "https://example.com",
+          "DataSource": {"Name": "debian"},
+          "CVSS": {"nvd": {"V3Score": 7.5, "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"}},
+          "Layer": {"Digest": "sha256:layer1"}
         }
       ]
     }
   ]
 }`
 	cycloneDX := `{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`
+	spdxJSON := `{"spdxVersion":"SPDX-2.3","name":"test"}`
 
 	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
 		if name != "trivy" {
@@ -42,6 +58,8 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 			return []byte(reportJSON), nil, 0, nil
 		case strings.Contains(joined, "--format cyclonedx"):
 			return []byte(cycloneDX), nil, 0, nil
+		case strings.Contains(joined, "--format spdx-json"):
+			return []byte(spdxJSON), nil, 0, nil
 		default:
 			t.Fatalf("unexpected args: %v", args)
 			return nil, nil, 1, errors.New("bad")
@@ -60,8 +78,26 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 	if v.VulnerabilityID != "CVE-2021-1" || v.PackageName != "bash" || v.DataSource != "debian" {
 		t.Fatalf("vuln: %+v", v)
 	}
-	if string(res.SBOM) != cycloneDX {
-		t.Fatalf("sbom: %s", res.SBOM)
+	if v.CVSSV3Score != 7.5 || v.CVSSV3Vector != "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N" {
+		t.Fatalf("cvss: score=%f vector=%s", v.CVSSV3Score, v.CVSSV3Vector)
+	}
+	if v.PrimaryURL != "https://example.com" {
+		t.Fatalf("primary_url: %s", v.PrimaryURL)
+	}
+	if v.LayerDigest != "sha256:layer1" {
+		t.Fatalf("layer_digest: %s", v.LayerDigest)
+	}
+	if string(res.SBOMCycloneDX) != cycloneDX {
+		t.Fatalf("cyclonedx: %s", res.SBOMCycloneDX)
+	}
+	if string(res.SBOMSPDX) != spdxJSON {
+		t.Fatalf("spdx: %s", res.SBOMSPDX)
+	}
+	if res.Metadata == nil || res.Metadata.OS != "alpine 3.19.0" {
+		t.Fatalf("metadata: %+v", res.Metadata)
+	}
+	if len(res.Packages) != 1 || res.Packages[0].Name != "musl" {
+		t.Fatalf("packages: %+v", res.Packages)
 	}
 }
 

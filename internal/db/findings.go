@@ -20,6 +20,11 @@ type FindingRow struct {
 	Title            string
 	Description      string
 	DataSource       string
+	CVSSV3Score      float64
+	CVSSV3Vector     string
+	PrimaryURL       string
+	LayerDigest      string
+	LayerIndex       int
 }
 
 // DeleteFindingsByScan removes findings for a scan (idempotent retries).
@@ -36,16 +41,27 @@ func BatchInsertFindings(ctx context.Context, pool *pgxpool.Pool, scanID uuid.UU
 	batch := &pgx.Batch{}
 	for _, r := range rows {
 		sev := normalizeSeverity(r.Severity)
+		vid := r.VulnerabilityID
+		if vid == "" {
+			vid = "UNKNOWN"
+		}
+		pkg := r.PackageName
+		if pkg == "" {
+			pkg = "unknown"
+		}
 		batch.Queue(`
 			INSERT INTO findings (
 				scan_id, vulnerability_id, package_name, installed_version, fixed_version,
-				severity, title, description, data_source
+				severity, title, description, data_source,
+				cvss_v3_score, cvss_v3_vector, primary_url, layer_digest, layer_index
 			) VALUES (
 				$1, $2, $3, $4, $5,
-				$6::severity, $7, $8, $9
+				$6::severity, $7, $8, $9,
+				$10, $11, $12, $13, $14
 			)`,
-			scanID, r.VulnerabilityID, r.PackageName, nullIfEmpty(r.InstalledVersion), nullIfEmpty(r.FixedVersion),
+			scanID, vid, pkg, nullIfEmpty(r.InstalledVersion), nullIfEmpty(r.FixedVersion),
 			sev, nullIfEmpty(r.Title), nullIfEmpty(r.Description), nullIfEmpty(r.DataSource),
+			nullIfZero(r.CVSSV3Score), nullIfEmpty(r.CVSSV3Vector), nullIfEmpty(r.PrimaryURL), nullIfEmpty(r.LayerDigest), nullIfZero(r.LayerIndex),
 		)
 	}
 	br := pool.SendBatch(ctx, batch)
@@ -72,4 +88,11 @@ func nullIfEmpty(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func nullIfZero[T int | float64](v T) interface{} {
+	if v == 0 {
+		return nil
+	}
+	return v
 }

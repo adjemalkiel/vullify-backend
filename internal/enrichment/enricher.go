@@ -131,6 +131,22 @@ func (e *Enricher) EnrichScan(ctx context.Context, scanID uuid.UUID) error {
 			}
 		}
 
+		// --- Risk scoring ---
+		var cvss float64
+		if f.CVSSV3Score != nil {
+			cvss = *f.CVSSV3Score
+		}
+		var epss float64
+		if upsert.EPSSScore != nil {
+			epss = *upsert.EPSSScore
+		}
+		// TODO: Integrate external exploit databases (e.g. nomi-sec PoC-in-GitHub) beyond KEV.
+		hasExploit := upsert.KEVListed
+		hasFix := f.FixedVersion != nil && *f.FixedVersion != ""
+		score := CalculateRiskScore(cvss, epss, upsert.KEVListed, hasExploit, hasFix)
+		upsert.ExploitExists = hasExploit
+		upsert.RiskScore = &score
+
 		if err := e.Repo.Upsert(ctx, upsert); err != nil {
 			e.Log.Error("enrichment: upsert failed", "finding_id", f.ID, "err", err)
 			continue

@@ -26,13 +26,13 @@ type Runner struct {
 	Redis   *redis.Client
 	Scanner scanner.Scanner
 
-	QueueKey      string // Redis list for LPUSH/BRPOP
-	EventsChannel string // Pub/Sub channel for scan.completed
+	QueueKey      string
+	EventsChannel string
 
-	PoolSize   int // concurrent BRPOP workers; default 3
-	MaxRetries int // per job; default 3
+	PoolSize   int
+	MaxRetries int
 
-	TrivyPath string // default "trivy"; used for version probe
+	TrivyPath string
 
 	Log *slog.Logger
 }
@@ -154,8 +154,7 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 		return err
 	}
 
-	rows := vulnResultsToRows(res.Vulnerabilities)
-	if err := db.PersistScanResults(ctx, r.Pool, scanID, rows, res.SBOM, trivyVer); err != nil {
+	if err := db.PersistScanResults(ctx, r.Pool, scanID, res, trivyVer); err != nil {
 		msg := err.Error()
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
 		_ = r.publishScanEvent(ctx, scanID, "failed", msg)
@@ -167,31 +166,6 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	}
 	log.Info("scan completed", "scan_id", scanID)
 	return nil
-}
-
-func vulnResultsToRows(vs []scanner.VulnResult) []db.FindingRow {
-	out := make([]db.FindingRow, 0, len(vs))
-	for _, v := range vs {
-		vid := v.VulnerabilityID
-		if strings.TrimSpace(vid) == "" {
-			vid = "UNKNOWN"
-		}
-		pkg := v.PackageName
-		if strings.TrimSpace(pkg) == "" {
-			pkg = "unknown"
-		}
-		out = append(out, db.FindingRow{
-			VulnerabilityID:  vid,
-			PackageName:      pkg,
-			InstalledVersion: v.InstalledVersion,
-			FixedVersion:     v.FixedVersion,
-			Severity:         v.Severity,
-			Title:            v.Title,
-			Description:      v.Description,
-			DataSource:       v.DataSource,
-		})
-	}
-	return out
 }
 
 type scanEvent struct {

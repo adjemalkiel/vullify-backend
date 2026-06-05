@@ -19,6 +19,7 @@ tags:
   - name: Findings
   - name: Dashboard
   - name: Reports
+  - name: Suppressions
 
 paths:
   /healthz:
@@ -488,6 +489,210 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationError"
 
+  /api/v1/scans/{id}/packages:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: List packages for scan
+      operationId: listScanPackages
+      parameters:
+        - name: type
+          in: query
+          description: Filter by package type (os, library, lang)
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated packages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PackageListEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scans/{id}/misconfigurations:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: List misconfigurations for scan
+      operationId: listScanMisconfigurations
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated misconfigurations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MisconfigurationListEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scans/{id}/secrets:
+    parameters:
+      - $ref: "#/components/parameters/ScanId"
+    get:
+      tags: [Scans]
+      summary: List secrets for scan
+      description: Returns redacted match text only. Full secret values are never exposed.
+      operationId: listScanSecrets
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated secrets (redacted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretListEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/scans/adhoc:
+    post:
+      tags: [Scans]
+      summary: Create ad-hoc scan
+      description: |
+        Accepts an image reference directly (no pre-existing image or registry required).
+        Upserts the image record, creates a scan, and enqueues it on Redis for the worker.
+      operationId: createAdHocScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdHocScanRequest"
+      responses:
+        "201":
+          description: Scan created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageScanReportEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/suppressions:
+    get:
+      tags: [Suppressions]
+      summary: List suppressions
+      operationId: listSuppressions
+      parameters:
+        - name: cve_id
+          in: query
+          schema:
+            type: string
+        - name: target_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated suppressions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionListEnvelope"
+    post:
+      tags: [Suppressions]
+      summary: Create suppression
+      description: Suppresses a specific CVE for a package/target combination.
+      operationId: createSuppression
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuppressionCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuppressionEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /api/v1/suppressions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SuppressionId"
+    delete:
+      tags: [Suppressions]
+      summary: Revoke suppression
+      operationId: deleteSuppression
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/dashboard/cves:
+    get:
+      tags: [Dashboard]
+      summary: Global CVE view
+      description: |
+        Returns unique CVEs across all scans, deduplicated, with aggregated risk scores.
+        Supports filtering by severity and sorting by risk_score.
+      operationId: dashboardCVEs
+      parameters:
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          description: Sort field (risk_score, severity, last_seen)
+          schema:
+            type: string
+            default: risk_score
+        - name: sort_order
+          in: query
+          description: Sort direction
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PerPage"
+      responses:
+        "200":
+          description: Paginated global CVE results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GlobalCVEResultEnvelope"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
 components:
   parameters:
     Page:
@@ -527,6 +732,13 @@ components:
         type: string
         format: uuid
     FindingId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SuppressionId:
       name: id
       in: path
       required: true
@@ -826,3 +1038,279 @@ components:
               type: array
               items:
                 $ref: "#/components/schemas/VulnerabilityReportRow"
+
+    Package:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scan_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: string
+        type:
+          type: string
+          description: os, library, or lang
+        layer_digest:
+          type: string
+          nullable: true
+        licenses:
+          type: array
+          items:
+            type: string
+        file_path:
+          type: string
+          nullable: true
+
+    PackageEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Package"
+
+    PackageListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Package"
+
+    Misconfiguration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scan_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        check_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+        resolution:
+          type: string
+        file_path:
+          type: string
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+
+    MisconfigurationEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Misconfiguration"
+
+    MisconfigurationListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Misconfiguration"
+
+    Secret:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scan_id:
+          type: string
+          format: uuid
+        rule_id:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        title:
+          type: string
+        match_text:
+          type: string
+          description: Redacted match — full secret values are never exposed
+        file_path:
+          type: string
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+        layer_digest:
+          type: string
+          nullable: true
+
+    SecretEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Secret"
+
+    SecretListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Secret"
+
+    Suppression:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        cve_id:
+          type: string
+        pkg_name:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: NULL means global suppression
+        reason:
+          type: string
+        accepted_by:
+          type: string
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    SuppressionCreate:
+      type: object
+      required: [cve_id, reason]
+      properties:
+        cve_id:
+          type: string
+        pkg_name:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    SuppressionEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Suppression"
+
+    SuppressionListEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/Suppression"
+
+    AdHocScanRequest:
+      type: object
+      required: [image_ref]
+      properties:
+        image_ref:
+          type: string
+          description: Fully qualified image reference (e.g. alpine:3.19, ghcr.io/org/repo:tag)
+        registry_id:
+          type: string
+          format: uuid
+          description: Optional registry to associate with the image
+
+    ImageScanReport:
+      type: object
+      properties:
+        scan_id:
+          type: string
+          format: uuid
+        image_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        image_ref:
+          type: string
+        repository:
+          type: string
+        tag:
+          type: string
+
+    ImageScanReportEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ImageScanReport"
+
+    GlobalCVEResult:
+      type: object
+      properties:
+        vulnerability_id:
+          type: string
+          description: CVE identifier
+        severity:
+          type: string
+        title:
+          type: string
+        affected_images:
+          type: integer
+        last_seen:
+          type: string
+        epss_score:
+          type: number
+          nullable: true
+        epss_percentile:
+          type: number
+          nullable: true
+        kev_listed:
+          type: boolean
+        risk_score:
+          type: number
+          nullable: true
+
+    GlobalCVEResultEnvelope:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/GlobalCVEResult"

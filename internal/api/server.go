@@ -41,7 +41,8 @@ func parseUUID(p string) (uuid.UUID, error) {
 
 func validRegistryType(t string) bool {
 	switch strings.ToLower(strings.TrimSpace(t)) {
-	case registry.TypeDockerHub, registry.TypeGitLab, registry.TypeECR, registry.TypeGCR, registry.TypeGHCR:
+	case registry.TypeDockerHub, registry.TypeGitLab, registry.TypeECR, registry.TypeGCR, registry.TypeGHCR,
+		registry.TypeACR, registry.TypeGeneric:
 		return true
 	default:
 		return false
