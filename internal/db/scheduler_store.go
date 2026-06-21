@@ -23,9 +23,10 @@ func SoftDeleteImageTagsNotIn(ctx context.Context, pool *pgxpool.Pool, registryI
 }
 
 // SoftDeleteImagesForRepositoriesNotIn soft-deletes images whose repository is not in liveRepos.
+// When liveRepos is empty, no images are deleted (prevents accidental mass deletion).
 func SoftDeleteImagesForRepositoriesNotIn(ctx context.Context, pool *pgxpool.Pool, registryID uuid.UUID, liveRepos []string) error {
-	if liveRepos == nil {
-		liveRepos = []string{}
+	if len(liveRepos) == 0 {
+		return nil
 	}
 	_, err := pool.Exec(ctx, `
 		UPDATE images SET deleted_at = now()

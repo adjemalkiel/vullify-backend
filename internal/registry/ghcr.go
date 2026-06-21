@@ -78,9 +78,11 @@ func (g *GHCR) TestConnection(ctx context.Context) error {
 	return nil
 }
 
-// ListRepositories is not implemented for GHCR (returns empty catalog).
+// ListRepositories is not supported by the GHCR API. The GitHub Container Registry
+// does not expose a repository catalog endpoint; images must be discovered via
+// manual ad-hoc scans, webhooks, or the sync-target endpoint.
 func (g *GHCR) ListRepositories(ctx context.Context) ([]string, error) {
-	return nil, nil
+	return nil, fmt.Errorf("ghcr: listing repositories is not supported by the registry API; add images via ad-hoc scan or webhook")
 }
 
 // ListTags lists tags via /v2/{repo}/tags/list.
