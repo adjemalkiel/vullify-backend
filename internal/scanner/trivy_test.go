@@ -48,7 +48,7 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 	cycloneDX := `{"bomFormat":"CycloneDX","specVersion":"1.4","version":1}`
 	spdxJSON := `{"spdxVersion":"SPDX-2.3","name":"test"}`
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		if name != "trivy" {
 			t.Fatalf("unexpected binary %q", name)
 		}
@@ -67,7 +67,7 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Exec: fake}
-	res, err := s.ScanImage(context.Background(), "alpine:3.19")
+	res, err := s.ScanImage(context.Background(), "alpine:3.19", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestTrivyScanner_ScanImage_Success(t *testing.T) {
 func TestTrivyScanner_ScanImage_PullFailure(t *testing.T) {
 	t.Parallel()
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "--format json") {
 			return nil, []byte("failed to pull image: not found"), 1, errors.New("exit status 1")
@@ -113,7 +113,7 @@ func TestTrivyScanner_ScanImage_PullFailure(t *testing.T) {
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Exec: fake}
-	_, err := s.ScanImage(context.Background(), "example.invalid/foo:tag")
+	_, err := s.ScanImage(context.Background(), "example.invalid/foo:tag", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -129,7 +129,7 @@ func TestTrivyScanner_ScanImage_PullFailure(t *testing.T) {
 func TestTrivyScanner_ScanImage_ScanFailure(t *testing.T) {
 	t.Parallel()
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "--format json") {
 			return nil, []byte("internal scanner error"), 2, errors.New("exit status 2")
@@ -138,7 +138,7 @@ func TestTrivyScanner_ScanImage_ScanFailure(t *testing.T) {
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Exec: fake}
-	_, err := s.ScanImage(context.Background(), "alpine:3.19")
+	_, err := s.ScanImage(context.Background(), "alpine:3.19", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -150,7 +150,7 @@ func TestTrivyScanner_ScanImage_ScanFailure(t *testing.T) {
 func TestTrivyScanner_ScanImage_InvalidJSONReport(t *testing.T) {
 	t.Parallel()
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "--format json") {
 			return []byte(`not json`), nil, 0, nil
@@ -159,7 +159,7 @@ func TestTrivyScanner_ScanImage_InvalidJSONReport(t *testing.T) {
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Exec: fake}
-	_, err := s.ScanImage(context.Background(), "alpine:3.19")
+	_, err := s.ScanImage(context.Background(), "alpine:3.19", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -171,7 +171,7 @@ func TestTrivyScanner_ScanImage_InvalidJSONReport(t *testing.T) {
 func TestTrivyScanner_ScanImage_InvalidCycloneDX(t *testing.T) {
 	t.Parallel()
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		joined := strings.Join(args, " ")
 		switch {
 		case strings.Contains(joined, "--format json"):
@@ -184,7 +184,7 @@ func TestTrivyScanner_ScanImage_InvalidCycloneDX(t *testing.T) {
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Exec: fake}
-	_, err := s.ScanImage(context.Background(), "alpine:3.19")
+	_, err := s.ScanImage(context.Background(), "alpine:3.19", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -195,11 +195,11 @@ func TestTrivyScanner_ScanImage_InvalidCycloneDX(t *testing.T) {
 
 func TestTrivyScanner_ScanImage_EmptyRef(t *testing.T) {
 	t.Parallel()
-	s := &TrivyScanner{Exec: func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	s := &TrivyScanner{Exec: func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		t.Fatal("exec should not run")
 		return nil, nil, 0, nil
 	}}
-	_, err := s.ScanImage(context.Background(), "  ")
+	_, err := s.ScanImage(context.Background(), "  ", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -208,13 +208,13 @@ func TestTrivyScanner_ScanImage_EmptyRef(t *testing.T) {
 func TestTrivyScanner_Timeout(t *testing.T) {
 	t.Parallel()
 
-	fake := func(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+	fake := func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 		<-ctx.Done()
 		return nil, []byte(ctx.Err().Error()), 1, ctx.Err()
 	}
 
 	s := &TrivyScanner{TrivyPath: "trivy", Timeout: 50 * time.Millisecond, Exec: fake}
-	_, err := s.ScanImage(context.Background(), "alpine:3.19")
+	_, err := s.ScanImage(context.Background(), "alpine:3.19", nil)
 	if err == nil {
 		t.Fatal("expected timeout")
 	}

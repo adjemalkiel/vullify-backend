@@ -162,7 +162,7 @@ func (h *Handler) processAsync(reg db.RegistryRow, source, eventType string, bod
 			return
 		}
 		ref := imageref.BuildImagePullRef(reg.URL, repository, tag)
-		if err := scanqueue.Enqueue(ctx, h.Redis, queueKey(h), scanID, ref); err != nil {
+		if err := scanqueue.Enqueue(ctx, h.Redis, queueKey(h), scanID, ref, scanqueue.CredentialsFromRegistryJSON(reg.Type, reg.Credentials)); err != nil {
 			log.Error("webhook: enqueue", "scan_id", scanID, "err", err)
 			return
 		}

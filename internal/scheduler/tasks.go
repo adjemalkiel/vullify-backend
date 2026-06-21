@@ -148,12 +148,16 @@ func enqueueScheduledScan(ctx context.Context, pool *pgxpool.Pool, rdb *redis.Cl
 	if err != nil {
 		return err
 	}
+	regRow, err := db.GetRegistryByID(ctx, pool, detail.RegistryID)
+	if err != nil {
+		return err
+	}
 	scanID, err := db.InsertScheduledScan(ctx, pool, imageID)
 	if err != nil {
 		return err
 	}
 	ref := imageref.BuildImagePullRef(detail.RegistryURL, detail.Repository, detail.Tag)
-	if err := scanqueue.Enqueue(ctx, rdb, qk, scanID, ref); err != nil {
+	if err := scanqueue.Enqueue(ctx, rdb, qk, scanID, ref, scanqueue.CredentialsFromRegistryJSON(regRow.Type, regRow.Credentials)); err != nil {
 		return err
 	}
 	log.Info("scheduled scan enqueued", "scan_id", scanID, "image_id", imageID)

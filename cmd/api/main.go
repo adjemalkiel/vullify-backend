@@ -11,8 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
 	"vullify/internal/api"
 	"vullify/internal/db"
 	"vullify/internal/scheduler"
@@ -44,7 +42,10 @@ func main() {
 	}
 	defer pool.Close()
 
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb, err := db.NewRedisClient(redisAddr)
+	if err != nil {
+		log.Fatalf("redis parse: %v", err)
+	}
 	defer func() { _ = rdb.Close() }()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		slog.Warn("redis ping failed; scan enqueue will fail until Redis is up", "err", err)

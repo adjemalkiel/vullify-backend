@@ -7,8 +7,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/redis/go-redis/v9"
-
 	"vullify/internal/db"
 	"vullify/internal/enrichment"
 )
@@ -33,7 +31,11 @@ func main() {
 	}
 	defer pool.Close()
 
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb, err := db.NewRedisClient(redisAddr)
+	if err != nil {
+		slog.Error("redis parse", "err", err)
+		os.Exit(1)
+	}
 	defer func() { _ = rdb.Close() }()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		slog.Error("redis ping", "err", err)

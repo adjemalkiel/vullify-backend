@@ -73,9 +73,10 @@ func (s *Server) createAdhocScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var regCreds *scanqueue.RegistryCredentials
 	if err == pgx.ErrNoRows {
 		host, repo, tag := parseImageRef(pullRef)
-		regID, regURL, err := findRegistryByHost(r.Context(), s.Pool, host)
+		regID, regURL, regRow, err := findRegistryByHost(r.Context(), s.Pool, host)
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR",
 				"no registry configured for "+host+"; register one first")
@@ -89,6 +90,7 @@ func (s *Server) createAdhocScan(w http.ResponseWriter, r *http.Request) {
 		}
 
 		pullRef = imageref.BuildImagePullRef(regURL, repo, tag)
+		regCreds = extractRegistryCredentials(&regRow)
 	}
 
 	ok, err := db.ImageIsActive(r.Context(), s.Pool, imgID)
@@ -103,7 +105,7 @@ func (s *Server) createAdhocScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := scanqueue.Enqueue(r.Context(), s.Redis, s.queueKey(), scanID, pullRef); err != nil {
+	if err := scanqueue.Enqueue(r.Context(), s.Redis, s.queueKey(), scanID, pullRef, regCreds); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to enqueue scan")
 		return
 	}
@@ -116,16 +118,23 @@ func (s *Server) createAdhocScan(w http.ResponseWriter, r *http.Request) {
 	writeEnvelope(w, http.StatusAccepted, scanDetailToResp(detail), nil)
 }
 
-func findRegistryByHost(ctx context.Context, pool *pgxpool.Pool, host string) (uuid.UUID, string, error) {
+func findRegistryByHost(ctx context.Context, pool *pgxpool.Pool, host string) (uuid.UUID, string, db.RegistryRow, error) {
 	regs, _, err := db.ListRegistries(ctx, pool, 0, 100)
 	if err != nil {
-		return uuid.Nil, "", err
+		return uuid.Nil, "", db.RegistryRow{}, err
 	}
 	hostLower := strings.ToLower(host)
 	for _, reg := range regs {
 		if strings.Contains(strings.ToLower(reg.URL), hostLower) {
-			return reg.ID, reg.URL, nil
+			return reg.ID, reg.URL, reg, nil
 		}
 	}
-	return uuid.Nil, "", pgx.ErrNoRows
+	return uuid.Nil, "", db.RegistryRow{}, pgx.ErrNoRows
+}
+
+func extractRegistryCredentials(reg *db.RegistryRow) *scanqueue.RegistryCredentials {
+	if reg == nil {
+		return nil
+	}
+	return scanqueue.CredentialsFromRegistryJSON(reg.Type, reg.Credentials)
 }

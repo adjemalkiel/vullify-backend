@@ -6,23 +6,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
 
 // ExecFunc runs a command like exec.CommandContext; used for tests (fake trivy).
-type ExecFunc func(ctx context.Context, name string, args []string) (stdout, stderr []byte, exitCode int, err error)
+type ExecFunc func(ctx context.Context, name string, args []string, env []string) (stdout, stderr []byte, exitCode int, err error)
 
 // TrivyScanner runs the trivy CLI as a subprocess.
 type TrivyScanner struct {
 	TrivyPath string
 	Timeout   time.Duration
 	Exec      ExecFunc
+
+	// ExtraEnv holds environment variables set on every trivy invocation
+	// (e.g. TRIVY_USERNAME, TRIVY_PASSWORD for registry auth).
+	ExtraEnv []string
 }
 
 // ScanImage implements Scanner.
-func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanResult, error) {
+func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *ScanImageOpts) (*ScanResult, error) {
 	if strings.TrimSpace(imageRef) == "" {
 		return nil, fmt.Errorf("scanner: empty image reference")
 	}
@@ -39,6 +44,17 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 		path = "trivy"
 	}
 
+	var extraEnv []string
+	if opts != nil {
+		if opts.RegistryUsername != "" {
+			extraEnv = append(extraEnv, "TRIVY_USERNAME="+opts.RegistryUsername)
+		}
+		if opts.RegistryPassword != "" {
+			extraEnv = append(extraEnv, "TRIVY_PASSWORD="+opts.RegistryPassword)
+		}
+	}
+	s.ExtraEnv = extraEnv
+
 	run := s.execFn()
 
 	jsonArgs := []string{
@@ -51,7 +67,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 		"--timeout", "10m",
 		imageRef,
 	}
-	stdout, stderr, exit, runErr := run(ctx, path, jsonArgs)
+	stdout, stderr, exit, runErr := run(ctx, path, jsonArgs, nil)
 	if runErr != nil || exit != 0 {
 		return nil, classifyAndWrap("json", stderr, exit, runErr)
 	}
@@ -72,7 +88,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 		"--format", "cyclonedx",
 		imageRef,
 	}
-	sbomOut, sbomErrText, sbomExit, sbomRunErr := run(ctx, path, sbomArgs)
+	sbomOut, sbomErrText, sbomExit, sbomRunErr := run(ctx, path, sbomArgs, nil)
 	if sbomRunErr != nil || sbomExit != 0 {
 		return nil, classifyAndWrap("cyclonedx", sbomErrText, sbomExit, sbomRunErr)
 	}
@@ -92,7 +108,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 		"--format", "spdx-json",
 		imageRef,
 	}
-	spdxOut, spdxErrText, spdxExit, spdxRunErr := run(ctx, path, spdxArgs)
+	spdxOut, spdxErrText, spdxExit, spdxRunErr := run(ctx, path, spdxArgs, nil)
 	if spdxRunErr != nil || spdxExit != 0 {
 		return nil, classifyAndWrap("spdx", spdxErrText, spdxExit, spdxRunErr)
 	}
@@ -111,17 +127,25 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string) (*ScanRes
 }
 
 func (s *TrivyScanner) execFn() ExecFunc {
+	extra := s.ExtraEnv
 	if s.Exec != nil {
-		return s.Exec
+		return func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
+			return s.Exec(ctx, name, args, append(env, extra...))
+		}
 	}
-	return defaultExec
+	return func(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
+		return defaultExec(ctx, name, args, append(env, extra...))
+	}
 }
 
-func defaultExec(ctx context.Context, name string, args []string) ([]byte, []byte, int, error) {
+func defaultExec(ctx context.Context, name string, args []string, env []string) ([]byte, []byte, int, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {

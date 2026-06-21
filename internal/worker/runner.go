@@ -146,7 +146,7 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 		return err
 	}
 
-	res, err := r.Scanner.ScanImage(ctx, job.ImageRef)
+	res, err := r.Scanner.ScanImage(ctx, job.ImageRef, scanOptsFromJob(job))
 	if err != nil {
 		msg := err.Error()
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
@@ -225,6 +225,19 @@ func (r *Runner) initDefaults() {
 	}
 	if r.Log == nil {
 		r.Log = slog.Default()
+	}
+}
+
+func scanOptsFromJob(job ScanJob) *scanner.ScanImageOpts {
+	if job.RegCreds == nil {
+		return nil
+	}
+	if job.RegCreds.Username == "" && job.RegCreds.Password == "" {
+		return nil
+	}
+	return &scanner.ScanImageOpts{
+		RegistryUsername: job.RegCreds.Username,
+		RegistryPassword: job.RegCreds.Password,
 	}
 }
 

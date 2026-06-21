@@ -6,8 +6,6 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/redis/go-redis/v9"
-
 	"vullify/internal/db"
 	"vullify/internal/scanner"
 )
@@ -30,7 +28,10 @@ func Run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	rdb, err := db.NewRedisClient(redisAddr)
+	if err != nil {
+		return err
+	}
 	defer func() { _ = rdb.Close() }()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {

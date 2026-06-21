@@ -91,7 +91,12 @@ func (s *Server) createScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ref := imageref.BuildImagePullRef(d.RegistryURL, d.Repository, d.Tag)
-	if err := scanqueue.Enqueue(r.Context(), s.Redis, s.queueKey(), scanID, ref); err != nil {
+	regRow, err := db.GetRegistryByID(r.Context(), s.Pool, d.RegistryID)
+	regCreds := (*scanqueue.RegistryCredentials)(nil)
+	if err == nil {
+		regCreds = extractRegistryCredentials(&regRow)
+	}
+	if err := scanqueue.Enqueue(r.Context(), s.Redis, s.queueKey(), scanID, ref, regCreds); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to enqueue scan")
 		return
 	}

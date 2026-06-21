@@ -80,9 +80,15 @@ type ScanResult struct {
 	SBOMSPDX         []byte
 }
 
+// ScanImageOpts carries optional registry credentials for authenticated pulls.
+type ScanImageOpts struct {
+	RegistryUsername string
+	RegistryPassword string
+}
+
 // Scanner runs container image scans (implemented by TrivyScanner; mock in tests).
 type Scanner interface {
-	ScanImage(ctx context.Context, imageRef string) (*ScanResult, error)
+	ScanImage(ctx context.Context, imageRef string, opts *ScanImageOpts) (*ScanResult, error)
 }
 
 // Sentinel errors for classification (use errors.Is).
