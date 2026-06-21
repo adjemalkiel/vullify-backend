@@ -1,0 +1,10 @@
+BEGIN;
+
+ALTER TABLE findings
+DROP COLUMN IF EXISTS cvss_v3_score,
+DROP COLUMN IF EXISTS cvss_v3_vector,
+DROP COLUMN IF EXISTS primary_url,
+DROP COLUMN IF EXISTS layer_digest,
+DROP COLUMN IF EXISTS layer_index;
+
+COMMIT;

@@ -1,0 +1,16 @@
+BEGIN;
+
+ALTER TABLE scans
+DROP COLUMN IF EXISTS critical_count,
+DROP COLUMN IF EXISTS high_count,
+DROP COLUMN IF EXISTS medium_count,
+DROP COLUMN IF EXISTS low_count,
+DROP COLUMN IF EXISTS unknown_count,
+DROP COLUMN IF EXISTS duration_ms,
+DROP COLUMN IF EXISTS image_os,
+DROP COLUMN IF EXISTS image_arch,
+DROP COLUMN IF EXISTS image_size,
+DROP COLUMN IF EXISTS layer_count,
+DROP COLUMN IF EXISTS base_image;
+
+COMMIT;

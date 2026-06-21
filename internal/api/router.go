@@ -40,6 +40,8 @@ func routes(s *Server) http.Handler {
 				r.Put("/", s.updateRegistry)
 				r.Delete("/", s.deleteRegistry)
 				r.Post("/sync", s.syncRegistry)
+				r.Get("/repositories", s.listRepositories)
+				r.Get("/repositories/*", s.listTags)
 			})
 		})
 
@@ -64,10 +66,21 @@ func routes(s *Server) http.Handler {
 
 		r.Get("/findings/{id}", s.getFinding)
 
+		r.Route("/targets", func(r chi.Router) {
+			r.Post("/", s.createTarget)
+			r.Get("/", s.listTargets)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Delete("/", s.deleteTarget)
+				r.Put("/", s.updateTarget)
+				r.Post("/scan", s.triggerTargetScan)
+			})
+		})
+
 		r.Route("/suppressions", func(r chi.Router) {
 			r.Get("/", s.listSuppressions)
 			r.Post("/", s.createSuppression)
 			r.Route("/{id}", func(r chi.Router) {
+				r.Patch("/", s.updateSuppression)
 				r.Delete("/", s.deleteSuppression)
 			})
 		})
@@ -77,6 +90,8 @@ func routes(s *Server) http.Handler {
 			r.Get("/cves", s.globalCVEView)
 		})
 		r.Get("/reports/vulnerability", s.vulnerabilityReport)
+		r.Post("/reports/generate", s.generateReport)
+		r.Get("/cves/{cve_id}", s.cveDetail)
 	})
 
 	return r
@@ -91,7 +106,7 @@ func healthz(w http.ResponseWriter, _ *http.Request) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Expose-Headers", "X-SBOM-Format")
 		w.Header().Set("Access-Control-Max-Age", "86400")

@@ -1,0 +1,1 @@
+ALTER TABLE suppressions ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();

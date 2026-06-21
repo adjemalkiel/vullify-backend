@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE enrichments
+DROP COLUMN IF EXISTS exploit_exists,
+DROP COLUMN IF EXISTS risk_score;
+
+COMMIT;

@@ -267,3 +267,73 @@ func (s *Server) syncRegistry(w http.ResponseWriter, r *http.Request) {
 	}
 	writeEnvelope(w, http.StatusOK, map[string]any{"synced_images": synced, "repositories_seen": len(repos)}, nil)
 }
+
+// listRepositories returns all repositories in a registry.
+func (s *Server) listRepositories(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	reg, err := db.GetRegistryByID(r.Context(), s.Pool, id)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "registry not found")
+		return
+	}
+	conn, err := registry.NewConnector(reg.Type, reg.Credentials)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	repos, err := conn.ListRepositories(r.Context())
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "REGISTRY_LIST_FAILED", err.Error())
+		return
+	}
+	if repos == nil {
+		repos = []string{}
+	}
+	writeEnvelope(w, http.StatusOK, map[string]any{"repositories": repos}, nil)
+}
+
+// listTags returns all tags for a repository within a registry.
+func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	repo := chi.URLParam(r, "*") // wildcard captures the full repository path including slashes
+	if strings.TrimSpace(repo) == "" {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "repository path is required")
+		return
+	}
+	reg, err := db.GetRegistryByID(r.Context(), s.Pool, id)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "registry not found")
+		return
+	}
+	conn, err := registry.NewConnector(reg.Type, reg.Credentials)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	tags, err := conn.ListTags(r.Context(), repo)
+	if err != nil {
+		writeAPIError(w, http.StatusBadGateway, "REGISTRY_TAGS_FAILED", err.Error())
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	page, perPage, offset := parsePagination(r)
+	if offset >= len(tags) {
+		writeEnvelope(w, http.StatusOK, []string{}, &Meta{Page: page, PerPage: perPage, Total: int64(len(tags))})
+		return
+	}
+	end := offset + perPage
+	if end > len(tags) {
+		end = len(tags)
+	}
+	writeEnvelope(w, http.StatusOK, tags[offset:end], &Meta{Page: page, PerPage: perPage, Total: int64(len(tags))})
+}

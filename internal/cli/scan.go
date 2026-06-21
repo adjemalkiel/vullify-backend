@@ -52,14 +52,12 @@ func newScanCmd() *cobra.Command {
 				s.Stop()
 				return err
 			}
-			short := scanID
-			if len(short) > 8 {
-				short = short[:8]
-			}
-			s.Suffix = fmt.Sprintf(" waiting for scan %s...", short)
+			fmt.Fprintf(os.Stderr, "Scan ID: %s\n", scanID)
+			s.Suffix = " waiting for scan..."
+			s.Restart()
 
 			st, err := pollUntilDone(ctx, client, scanID, 2*time.Second, func(status string) {
-				s.Suffix = fmt.Sprintf(" scan %s — %s", short, status)
+				s.Suffix = fmt.Sprintf(" scan — %s", status)
 			})
 			s.Stop()
 			if err != nil {

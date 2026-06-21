@@ -50,13 +50,13 @@ type apiErrorBody struct {
 	} `json:"error"`
 }
 
-// CreateScanByRef POST /api/v1/scans with image_ref.
+// CreateScanByRef POST /api/v1/scans/adhoc with image_ref (auto-creates image + registry lookup).
 func (c *Client) CreateScanByRef(ctx context.Context, imageRef string) (string, error) {
 	body, err := json.Marshal(map[string]string{"image_ref": strings.TrimSpace(imageRef)})
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/scans", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/scans/adhoc", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
