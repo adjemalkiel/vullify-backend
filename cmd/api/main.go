@@ -19,7 +19,11 @@ import (
 )
 
 func main() {
-	addr := getenv("HTTP_ADDR", ":8080")
+	addr := getenv("HTTP_ADDR", "")
+	if addr == "" {
+		port := getenv("PORT", "8080")
+		addr = ":" + port
+	}
 	dsn := getenv("DATABASE_URL", "postgres://vullify:vullify@localhost:5432/vullify?sslmode=disable")
 	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
 
