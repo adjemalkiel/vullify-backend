@@ -251,3 +251,45 @@ func (s *Server) getScanSBOM(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
 }
+
+// scanProgress returns the current pipeline phase for a running scan.
+func (s *Server) scanProgress(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	phase, err := s.Redis.Get(r.Context(), "vullify:scan:"+id.String()+":phase").Result()
+	if err != nil {
+		// Key not found — fall back to scan status
+		detail, dbErr := db.GetScanDetail(r.Context(), s.Pool, id)
+		if dbErr != nil {
+			writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "scan not found")
+			return
+		}
+		phase = detail.Status
+	}
+	startedAt := ""
+	scan, dbErr := db.GetScanDetail(r.Context(), s.Pool, id)
+	if dbErr == nil && scan.StartedAt != nil {
+		startedAt = scan.StartedAt.UTC().Format(timeRFC3339)
+	}
+	writeEnvelope(w, http.StatusOK, map[string]any{
+		"phase":      phase,
+		"status":     phaseToStatus(phase),
+		"started_at": startedAt,
+	}, nil)
+}
+
+func phaseToStatus(phase string) string {
+	switch phase {
+	case "initializing", "scanning", "persisting":
+		return "running"
+	case "completed":
+		return "completed"
+	case "failed":
+		return "failed"
+	default:
+		return "running"
+	}
+}

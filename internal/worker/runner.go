@@ -140,27 +140,35 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	scanID := job.ScanID
 	trivyVer := r.probeTrivyVersion(ctx)
 
+	r.setScanPhase(ctx, scanID, "initializing")
+
 	if err := db.UpdateScanRunning(ctx, r.Pool, scanID); err != nil {
+		_ = r.setScanPhase(ctx, scanID, "failed")
 		_ = r.publishScanEvent(ctx, scanID, "failed", err.Error())
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, err.Error())
 		return err
 	}
 
+	r.setScanPhase(ctx, scanID, "scanning")
 	res, err := r.Scanner.ScanImage(ctx, job.ImageRef, scanOptsFromJob(job))
 	if err != nil {
 		msg := err.Error()
+		_ = r.setScanPhase(ctx, scanID, "failed")
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
 		_ = r.publishScanEvent(ctx, scanID, "failed", msg)
 		return err
 	}
 
+	r.setScanPhase(ctx, scanID, "persisting")
 	if err := db.PersistScanResults(ctx, r.Pool, scanID, res, trivyVer); err != nil {
 		msg := err.Error()
+		_ = r.setScanPhase(ctx, scanID, "failed")
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
 		_ = r.publishScanEvent(ctx, scanID, "failed", msg)
 		return err
 	}
 
+	r.setScanPhase(ctx, scanID, "completed")
 	if err := r.publishScanEvent(ctx, scanID, "completed", ""); err != nil {
 		log.Warn("publish scan.completed", "scan_id", scanID, "err", err)
 	}
@@ -186,6 +194,16 @@ func (r *Runner) publishScanEvent(ctx context.Context, scanID uuid.UUID, status,
 		return err
 	}
 	return r.Redis.Publish(ctx, r.eventsChannel(), payload).Err()
+}
+
+// setScanPhase stores the current pipeline phase in Redis with a 30-minute TTL.
+// Phases: initializing, scanning, persisting, completed, failed.
+func (r *Runner) setScanPhase(ctx context.Context, scanID uuid.UUID, phase string) error {
+	return r.Redis.SetEx(ctx,
+		fmt.Sprintf("vullify:scan:%s:phase", scanID.String()),
+		phase,
+		30*time.Minute,
+	).Err()
 }
 
 func (r *Runner) probeTrivyVersion(ctx context.Context) string {
