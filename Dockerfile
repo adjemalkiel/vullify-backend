@@ -14,11 +14,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./c
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata curl
 
-# Download trivy binary from GitHub
-ARG TRIVY_VERSION=0.62.1
-RUN curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | \
-    tar xz -C /usr/local/bin trivy && \
-    chmod +x /usr/local/bin/trivy && \
+# Install trivy via the official install script (v0.71.1)
+RUN curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | \
+    sh -s -- -b /usr/local/bin v0.71.1 && \
     trivy --version
 
 COPY --from=builder /out/api /usr/local/bin/api
@@ -26,8 +24,6 @@ COPY migrations /migrations
 
 ENV MIGRATIONS_DIR=/migrations
 ENV TRIVY_PATH=/usr/local/bin/trivy
-
-# Use /tmp as Trivy cache so it's writable by the 'nobody' user
 ENV TRIVY_CACHE_DIR=/tmp/trivy-cache
 
 USER nobody
