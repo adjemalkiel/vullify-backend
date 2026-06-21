@@ -39,7 +39,12 @@ func GetDashboardSummary(ctx context.Context, pool *pgxpool.Pool) (DashboardSumm
 	`).Scan(&s.TotalImages); err != nil {
 		return s, err
 	}
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM scans`).Scan(&s.TotalScans); err != nil {
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM scans s
+		JOIN images i ON i.id = s.image_id
+		JOIN registries r ON r.id = i.registry_id
+		WHERE i.deleted_at IS NULL AND r.deleted_at IS NULL
+	`).Scan(&s.TotalScans); err != nil {
 		return s, err
 	}
 	if err := pool.QueryRow(ctx, `
