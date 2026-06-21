@@ -24,6 +24,10 @@ func main() {
 		port := getenv("PORT", "8080")
 		addr = ":" + port
 	}
+	// If addr is a bare port number (e.g. Render sets PORT=8080 with no colon), prepend one.
+	if len(addr) > 0 && addr[0] != ':' && !containsColon(addr) {
+		addr = ":" + addr
+	}
 	dsn := getenv("DATABASE_URL", "postgres://vullify:vullify@localhost:5432/vullify?sslmode=disable")
 	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
 
@@ -87,4 +91,13 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+func containsColon(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == ':' {
+			return true
+		}
+	}
+	return false
 }
