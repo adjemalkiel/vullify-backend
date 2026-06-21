@@ -12,12 +12,14 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata redis
+
 COPY --from=builder /out/api /usr/local/bin/api
 COPY migrations /migrations
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENV MIGRATIONS_DIR=/migrations
 
-USER nobody
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/api"]
+ENTRYPOINT ["/entrypoint.sh"]
