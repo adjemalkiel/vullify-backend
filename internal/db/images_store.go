@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -77,6 +78,19 @@ func ListImages(ctx context.Context, pool *pgxpool.Pool, registryID *uuid.UUID, 
 	return out, total, rows.Err()
 }
 
+// SoftDeleteImage sets deleted_at on an image.
+func SoftDeleteImage(ctx context.Context, pool *pgxpool.Pool, id uuid.UUID) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE images SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("image not found or already deleted: %s", id)
+	}
+	return nil
+}
 // ImageDetail includes registry URL for pull ref and latest scan summary.
 type ImageDetail struct {
 	ImageRow

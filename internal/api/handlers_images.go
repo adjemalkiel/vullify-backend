@@ -93,3 +93,16 @@ func (s *Server) getImage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeEnvelope(w, http.StatusOK, resp, nil)
 }
+
+func (s *Server) deleteImage(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	if err := db.SoftDeleteImage(r.Context(), s.Pool, id); err != nil {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

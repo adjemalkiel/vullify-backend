@@ -48,6 +48,7 @@ func routes(s *Server) http.Handler {
 		r.Route("/images", func(r chi.Router) {
 			r.Get("/", s.listImages)
 			r.Get("/{id}", s.getImage)
+			r.Delete("/{id}", s.deleteImage)
 		})
 
 		r.Route("/scans", func(r chi.Router) {
