@@ -158,8 +158,9 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	if err != nil {
 		msg := err.Error()
 		if scanner.IsPullFailure(err) {
-			msg += "\n\nThe image could not be pulled. Possible causes:\n" +
-				"• The image does not exist on this registry (check you are scanning against the correct registry)\n" +
+			msg += "\n---TIPS---\n" +
+				"The image could not be pulled. Possible causes:\n" +
+				"• The image does not exist on this registry (check you're scanning against the correct one)\n" +
 				"• The image is private and requires authentication\n" +
 				"• The repository or tag name is incorrect"
 		}
