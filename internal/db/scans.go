@@ -90,3 +90,20 @@ func UpdateScanFailed(ctx context.Context, pool *pgxpool.Pool, scanID uuid.UUID,
 	`, scanID, errMsg)
 	return err
 }
+
+// CancelScan sets status to cancelled for pending or running scans.
+func CancelScan(ctx context.Context, pool *pgxpool.Pool, scanID uuid.UUID) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE scans
+		SET status = 'cancelled',
+		    completed_at = now()
+		WHERE id = $1 AND status IN ('pending', 'running')
+	`, scanID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("scan not found or not cancellable: %s", scanID)
+	}
+	return nil
+}

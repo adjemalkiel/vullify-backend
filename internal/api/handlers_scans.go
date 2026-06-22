@@ -293,3 +293,64 @@ func phaseToStatus(phase string) string {
 		return "running"
 	}
 }
+
+// cancelScan sets the scan status to cancelled (only for pending/running scans).
+func (s *Server) cancelScan(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	if err := db.CancelScan(r.Context(), s.Pool, id); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "CANCEL_FAILED", err.Error())
+		return
+	}
+	detail, _ := db.GetScanDetail(r.Context(), s.Pool, id)
+	writeEnvelope(w, http.StatusOK, scanDetailToResp(detail), nil)
+}
+
+// rerunScan creates a new scan for the same image and enqueues it.
+func (s *Server) rerunScan(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, "VALIDATION_ERROR", "invalid id")
+		return
+	}
+	prev, err := db.GetScanDetail(r.Context(), s.Pool, id)
+	if err != nil {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "scan not found")
+		return
+	}
+	ok, err := db.ImageIsActive(r.Context(), s.Pool, prev.ImageID)
+	if err != nil || !ok {
+		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "image not found or inactive")
+		return
+	}
+	scanID, err := db.InsertManualScan(r.Context(), s.Pool, prev.ImageID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create scan")
+		return
+	}
+	// Build pull ref from the stored repository/tag and registry URL
+	img, err := db.GetImageByID(r.Context(), s.Pool, prev.ImageID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load image")
+		return
+	}
+	ref := imageref.BuildImagePullRef(img.RegistryURL, img.Repository, img.Tag)
+	regRow, err := db.GetRegistryByID(r.Context(), s.Pool, img.RegistryID)
+	regCreds := (*scanqueue.RegistryCredentials)(nil)
+	if err == nil {
+		regCreds = extractRegistryCredentials(&regRow)
+	}
+	if err := scanqueue.Enqueue(r.Context(), s.Redis, s.queueKey(), scanID, ref, regCreds); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to enqueue scan")
+		return
+	}
+	detail, err := db.GetScanDetail(r.Context(), s.Pool, scanID)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load scan")
+		return
+	}
+	writeEnvelope(w, http.StatusCreated, scanDetailToResp(detail), nil)
+}

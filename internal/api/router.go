@@ -57,6 +57,8 @@ func routes(s *Server) http.Handler {
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", s.getScan)
 				r.Get("/progress", s.scanProgress)
+				r.Post("/cancel", s.cancelScan)
+				r.Post("/rerun", s.rerunScan)
 				r.Get("/findings", s.listScanFindings)
 				r.Get("/sbom", s.getScanSBOM)
 				r.Get("/packages", s.listPackages)
