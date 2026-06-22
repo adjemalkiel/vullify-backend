@@ -163,10 +163,6 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	res, err := r.Scanner.ScanImage(ctx, job.ImageRef, scanOptsFromJob(job))
 	if err != nil {
 		msg := err.Error()
-		// Add credential hint for pull/auth failures
-		if scanner.IsPullFailure(err) && !hasCreds {
-			msg = msg + "; no registry credentials were provided — verify the registry username/password in Vullify settings"
-		}
 		_ = r.setScanPhase(ctx, scanID, "failed")
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
 		_ = r.publishScanEvent(ctx, scanID, "failed", msg)
