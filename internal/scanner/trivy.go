@@ -86,6 +86,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *Sca
 	sbomArgs := []string{
 		"image",
 		"--format", "cyclonedx",
+		"--scanners", "vuln,misconfig,secret,license",
 		imageRef,
 	}
 	sbomOut, sbomErrText, sbomExit, sbomRunErr := run(ctx, path, sbomArgs, nil)
