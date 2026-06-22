@@ -91,6 +91,18 @@ func (s *Server) createAdhocScan(w http.ResponseWriter, r *http.Request) {
 
 		pullRef = imageref.BuildImagePullRef(regURL, repo, tag)
 		regCreds = extractRegistryCredentials(&regRow)
+	} else {
+		// Image already exists — still need to extract credentials and rebuild pullRef
+		img, imgErr := db.GetImageByID(r.Context(), s.Pool, imgID)
+		if imgErr != nil {
+			writeAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to load image")
+			return
+		}
+		regRow, regErr := db.GetRegistryByID(r.Context(), s.Pool, img.RegistryID)
+		if regErr == nil {
+			pullRef = imageref.BuildImagePullRef(regRow.URL, img.Repository, img.Tag)
+			regCreds = extractRegistryCredentials(&regRow)
+		}
 	}
 
 	ok, err := db.ImageIsActive(r.Context(), s.Pool, imgID)
