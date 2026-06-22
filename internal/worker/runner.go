@@ -105,8 +105,7 @@ func (r *Runner) workerLoop(ctx context.Context, workerID int) {
 			continue
 		}
 
-		log.Info("job received", "worker", workerID, "scan_id", job.ScanID, "image_ref", job.ImageRef,
-			"has_creds", job.RegCreds != nil && (job.RegCreds.Username != "" || job.RegCreds.Password != ""))
+		log.Info("job received", "worker", workerID, "scan_id", job.ScanID, "image_ref", job.ImageRef)
 
 		if err := r.processJobWithRetry(ctx, job); err != nil {
 			log.Error("job failed after retries", "worker", workerID, "scan_id", job.ScanID, "err", err)
@@ -117,8 +116,7 @@ func (r *Runner) workerLoop(ctx context.Context, workerID int) {
 func (r *Runner) processJobWithRetry(ctx context.Context, job ScanJob) error {
 	log := r.Log
 	var lastErr error
-	maxRetries := r.MaxRetries
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < r.MaxRetries; attempt++ {
 		if attempt > 0 {
 			backoff := time.Duration(100*(1<<uint(attempt-1))) * time.Millisecond
 			log.Info("retrying job", "scan_id", job.ScanID, "attempt", attempt+1, "backoff", backoff)
@@ -132,11 +130,6 @@ func (r *Runner) processJobWithRetry(ctx context.Context, job ScanJob) error {
 		if lastErr == nil {
 			return nil
 		}
-		// Don't retry auth/pull failures — bad credentials won't fix themselves
-		if scanner.IsPullFailure(lastErr) {
-			log.Warn("job failed with pull/auth error, skipping retries", "scan_id", job.ScanID, "err", lastErr)
-			return lastErr
-		}
 		log.Warn("job attempt failed", "scan_id", job.ScanID, "attempt", attempt+1, "err", lastErr)
 	}
 	return lastErr
@@ -146,9 +139,6 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	log := r.Log
 	scanID := job.ScanID
 	trivyVer := r.probeTrivyVersion(ctx)
-
-	hasCreds := job.RegCreds != nil && (job.RegCreds.Username != "" || job.RegCreds.Password != "")
-	log.Info("starting pipeline", "scan_id", scanID, "image_ref", job.ImageRef, "has_creds", hasCreds)
 
 	r.setScanPhase(ctx, scanID, "initializing")
 
