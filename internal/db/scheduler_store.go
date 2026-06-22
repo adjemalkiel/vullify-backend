@@ -92,6 +92,37 @@ func ListImageIDsStaleForRescan(ctx context.Context, pool *pgxpool.Pool, cutoff 
 	return out, rows.Err()
 }
 
+// TargetRescanRow is a target due for rescan with its last scan timestamp.
+type TargetRescanRow struct {
+	TargetID     uuid.UUID
+	ImageID      uuid.UUID
+	ScanFrequency string
+	LastScannedAt *time.Time
+}
+
+// ListTargetsDueForRescan returns targets whose last scan is older than scan_frequency.
+func ListTargetsDueForRescan(ctx context.Context, pool *pgxpool.Pool) ([]TargetRescanRow, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT t.id, t.image_id, t.scan_frequency,
+			   (SELECT MAX(s.completed_at) FROM scans s WHERE s.image_id = t.image_id AND s.status = 'completed')
+		FROM targets t
+		WHERE t.deleted_at IS NULL
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TargetRescanRow
+	for rows.Next() {
+		var r TargetRescanRow
+		if err := rows.Scan(&r.TargetID, &r.ImageID, &r.ScanFrequency, &r.LastScannedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ImageChangeRow is an active image with registry connector fields for digest checks.
 type ImageChangeRow struct {
 	ID           uuid.UUID

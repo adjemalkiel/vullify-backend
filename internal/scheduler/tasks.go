@@ -99,6 +99,58 @@ func runPeriodicRescan(ctx context.Context, pool *pgxpool.Pool, rdb *redis.Clien
 	}
 }
 
+// runTargetRescan scans all monitored targets whose last scan is older than their scan_frequency.
+func runTargetRescan(ctx context.Context, pool *pgxpool.Pool, rdb *redis.Client, cfg Config, log *slog.Logger) {
+	targets, err := db.ListTargetsDueForRescan(ctx, pool)
+	if err != nil {
+		log.Error("target rescan: list targets", "err", err)
+		return
+	}
+	qk := queueKey(cfg)
+	now := time.Now()
+	enqueued := 0
+	for _, tr := range targets {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		dur, err := parseFrequency(tr.ScanFrequency)
+		if err != nil {
+			log.Warn("target rescan: invalid frequency", "target_id", tr.TargetID, "freq", tr.ScanFrequency, "err", err)
+			continue
+		}
+		// If never scanned or last scan older than frequency window, enqueue
+		if tr.LastScannedAt == nil || now.Sub(*tr.LastScannedAt) > dur {
+			busy, err := db.ImageHasPendingOrRunningScan(ctx, pool, tr.ImageID)
+			if err != nil {
+				log.Warn("target rescan: check busy", "target_id", tr.TargetID, "err", err)
+				continue
+			}
+			if busy {
+				continue
+			}
+			if err := enqueueScheduledScan(ctx, pool, rdb, qk, tr.ImageID, log); err != nil {
+				log.Warn("target rescan: enqueue", "target_id", tr.TargetID, "image_id", tr.ImageID, "err", err)
+				continue
+			}
+			enqueued++
+		}
+	}
+	if enqueued > 0 {
+		log.Info("target rescan: enqueued scans", "count", enqueued)
+	}
+}
+
+// parseFrequency parses a scan frequency string like "24h", "6h", "7d".
+func parseFrequency(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
 func runChangeDetection(ctx context.Context, pool *pgxpool.Pool, rdb *redis.Client, cfg Config, log *slog.Logger) {
 	rows, err := db.ListImagesForChangeDetection(ctx, pool)
 	if err != nil {

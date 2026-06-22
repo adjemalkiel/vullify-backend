@@ -49,6 +49,16 @@ func Run(ctx context.Context, pool *pgxpool.Pool, rdb *redis.Client, log *slog.L
 		}()
 	}
 
+	if cfg.TargetRescanInterval > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runTicker(ctx, cfg.TargetRescanInterval, "target_rescan", log, rdb, func(inner context.Context) {
+				runTargetRescan(inner, pool, rdb, cfg, log)
+			})
+		}()
+	}
+
 	<-ctx.Done()
 	wg.Wait()
 }

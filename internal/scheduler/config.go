@@ -11,6 +11,7 @@ import (
 type Config struct {
 	RegistrySyncInterval    time.Duration
 	PeriodicRescanInterval  time.Duration
+	TargetRescanInterval    time.Duration
 	ChangeDetectionInterval time.Duration
 	StaleScanAge            time.Duration
 	QueueKey                string
@@ -20,7 +21,8 @@ type Config struct {
 func LoadConfig() Config {
 	c := Config{
 		RegistrySyncInterval:    time.Hour,
-		PeriodicRescanInterval: 24 * time.Hour,
+		PeriodicRescanInterval:  24 * time.Hour,
+		TargetRescanInterval:    30 * time.Minute,
 		ChangeDetectionInterval: 30 * time.Minute,
 		StaleScanAge:            24 * time.Hour,
 		QueueKey:                os.Getenv("SCAN_QUEUE_KEY"),
@@ -43,6 +45,11 @@ func LoadConfig() Config {
 	if v := os.Getenv("SCHEDULER_STALE_SCAN_AGE"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.StaleScanAge = d
+		}
+	}
+	if v := os.Getenv("SCHEDULER_TARGET_RESCAN_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.TargetRescanInterval = d
 		}
 	}
 	return c
