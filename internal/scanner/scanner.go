@@ -80,10 +80,11 @@ type ScanResult struct {
 	SBOMSPDX         []byte
 }
 
-// ScanImageOpts carries optional registry credentials for authenticated pulls.
+// ScanImageOpts carries optional registry credentials and per-scan cache isolation.
 type ScanImageOpts struct {
 	RegistryUsername string
 	RegistryPassword string
+	CacheDir         string // unique per-scan cache directory to avoid FS cache contention
 }
 
 // Scanner runs container image scans (implemented by TrivyScanner; mock in tests).

@@ -55,6 +55,19 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *Sca
 	}
 	s.ExtraEnv = extraEnv
 
+	// Per-scan cache directory to avoid FS cache contention between parallel workers.
+	cacheDir := ""
+	if opts != nil && opts.CacheDir != "" {
+		cacheDir = opts.CacheDir
+	}
+	if cacheDir == "" {
+		cacheDir = os.TempDir() + "/trivy-cache"
+	}
+
+	// Ensure cache dir exists (ignore error — Trivy will create it internally if possible).
+	_ = os.MkdirAll(cacheDir, 0o755)
+	defer func() { _ = os.RemoveAll(cacheDir) }()
+
 	run := s.execFn()
 
 	jsonArgs := []string{
@@ -65,6 +78,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *Sca
 		"--pkg-types", "os,library",
 		"--quiet",
 		"--timeout", "10m",
+		"--cache-dir", cacheDir,
 		imageRef,
 	}
 	stdout, stderr, exit, runErr := run(ctx, path, jsonArgs, nil)
@@ -87,6 +101,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *Sca
 		"image",
 		"--format", "cyclonedx",
 		"--scanners", "vuln,misconfig,secret,license",
+		"--cache-dir", cacheDir,
 		imageRef,
 	}
 	sbomOut, sbomErrText, sbomExit, sbomRunErr := run(ctx, path, sbomArgs, nil)
@@ -107,6 +122,7 @@ func (s *TrivyScanner) ScanImage(ctx context.Context, imageRef string, opts *Sca
 	spdxArgs := []string{
 		"image",
 		"--format", "spdx-json",
+		"--cache-dir", cacheDir,
 		imageRef,
 	}
 	spdxOut, spdxErrText, spdxExit, spdxRunErr := run(ctx, path, spdxArgs, nil)

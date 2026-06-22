@@ -28,7 +28,6 @@ RUN chmod +x /start.sh
 
 ENV MIGRATIONS_DIR=/migrations
 ENV TRIVY_PATH=/usr/local/bin/trivy
-ENV TRIVY_CACHE_DIR=/tmp/trivy-cache
 
 USER nobody
 EXPOSE 8080

@@ -247,16 +247,14 @@ func (r *Runner) initDefaults() {
 }
 
 func scanOptsFromJob(job ScanJob) *scanner.ScanImageOpts {
-	if job.RegCreds == nil {
-		return nil
+	opts := &scanner.ScanImageOpts{
+		CacheDir: os.TempDir() + "/trivy-cache/" + job.ScanID.String(),
 	}
-	if job.RegCreds.Username == "" && job.RegCreds.Password == "" {
-		return nil
+	if job.RegCreds != nil {
+		opts.RegistryUsername = job.RegCreds.Username
+		opts.RegistryPassword = job.RegCreds.Password
 	}
-	return &scanner.ScanImageOpts{
-		RegistryUsername: job.RegCreds.Username,
-		RegistryPassword: job.RegCreds.Password,
-	}
+	return opts
 }
 
 func (r *Runner) queueKey() string {

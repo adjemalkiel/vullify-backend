@@ -52,7 +52,7 @@ func Run(ctx context.Context) error {
 		Scanner:       sc,
 		QueueKey:      os.Getenv("SCAN_QUEUE_KEY"),
 		EventsChannel: os.Getenv("SCAN_EVENTS_CHANNEL"),
-		PoolSize:      envInt("WORKER_POOL_SIZE", 3),
+		PoolSize:      envInt("WORKER_POOL_SIZE", 2),
 		MaxRetries:    envInt("JOB_MAX_RETRIES", 3),
 		TrivyPath:     trivyPath,
 		Log:           log,
