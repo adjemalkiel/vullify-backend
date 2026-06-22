@@ -130,6 +130,10 @@ func (r *Runner) processJobWithRetry(ctx context.Context, job ScanJob) error {
 		if lastErr == nil {
 			return nil
 		}
+		// Pull/auth failures won't fix themselves on retry
+		if scanner.IsPullFailure(lastErr) {
+			return lastErr
+		}
 		log.Warn("job attempt failed", "scan_id", job.ScanID, "attempt", attempt+1, "err", lastErr)
 	}
 	return lastErr
@@ -153,6 +157,12 @@ func (r *Runner) runPipeline(ctx context.Context, job ScanJob) error {
 	res, err := r.Scanner.ScanImage(ctx, job.ImageRef, scanOptsFromJob(job))
 	if err != nil {
 		msg := err.Error()
+		if scanner.IsPullFailure(err) {
+			msg += "\n\nThe image could not be pulled. Possible causes:\n" +
+				"• The image does not exist on this registry (check you are scanning against the correct registry)\n" +
+				"• The image is private and requires authentication\n" +
+				"• The repository or tag name is incorrect"
+		}
 		_ = r.setScanPhase(ctx, scanID, "failed")
 		_ = db.UpdateScanFailed(ctx, r.Pool, scanID, msg)
 		_ = r.publishScanEvent(ctx, scanID, "failed", msg)

@@ -200,6 +200,7 @@ func classifyTrivyFailure(stderr string, exit int) ErrorKind {
 		strings.Contains(s, "not found: manifest") ||
 		strings.Contains(s, "denied: requested access") ||
 		strings.Contains(s, "authorization failed") ||
+		strings.Contains(s, "unauthorized") ||
 		strings.Contains(s, "no match for platform") && strings.Contains(s, "manifest") {
 		return KindPull
 	}
